@@ -41,3 +41,16 @@ test('custom password is used for compression and verification', () => {
   assert.ok(compressArgs.includes('-p新密码'));
   assert.ok(buildVerifyArgs('E:\\stage\\archive.7z', '新密码').includes('-p新密码'));
 });
+
+test('zip format uses selected compression level without 7z header encryption', () => {
+  const args = buildCompressArgs({
+    totalBytes: 1,
+    sourcePath: 'E:\\source\\folder',
+    archiveFormat: 'zip',
+    compressionLevel: 7
+  }, 'E:\\stage\\archive.zip', 'zip-pass');
+  assert.ok(args.includes('-tzip'));
+  assert.ok(args.includes('-mx=7'));
+  assert.ok(args.includes('-pzip-pass'));
+  assert.equal(args.includes('-mhe=on'), false);
+});

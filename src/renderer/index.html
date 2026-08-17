@@ -106,11 +106,6 @@
               <div><input id="archive-staging-directory" type="text" readonly></div>
               <small>默认在打包存放点同目录下新建一个 staging 文件夹，目录不存在时自动创建</small>
             </label>
-            <label class="path-field advanced-path-field">
-              <span>7-Zip 程序位置</span>
-              <div><input id="seven-zip-path" type="text"><button id="choose-seven-zip" type="button">选择</button></div>
-              <small>默认使用软件随附的便携版 7-Zip，也可选择其他 7z.exe</small>
-            </label>
           </div>
           <div class="password-row archive-password-setting">
             <span>解压密码</span>
@@ -125,7 +120,7 @@
             <label class="option-card">
               <input id="video-frame-backup" type="checkbox">
               <span><strong>视频帧备份</strong><small>按总时长平均抽取画面，并在仓库中按视频成组显示</small></span>
-              <input id="video-frame-count" type="number" min="1" max="20" step="1" value="6" aria-label="每个视频保存的帧数">
+              <input id="video-frame-count" type="number" min="1" max="20" step="1" value="3" aria-label="每个视频保存的帧数">
               <em>帧/视频</em>
             </label>
             <label class="option-card">
@@ -154,8 +149,28 @@
           </div>
           <label class="compact-number-setting">
             <span><strong>单个项目缩略图上限</strong><small>包括图片缩略图与视频抽帧，避免超大项目生成过多预览。</small></span>
-            <input id="thumbnail-limit" type="number" min="1" max="500" step="1" value="100" aria-label="单个项目缩略图上限">
+            <input id="thumbnail-limit" type="number" min="1" max="500" step="1" value="30" aria-label="单个项目缩略图上限">
             <em>张</em>
+          </label>
+          <label class="compact-number-setting compression-setting">
+            <span><strong>压缩格式</strong><small>7z 压缩能力更强；ZIP 兼容性更广。</small></span>
+            <select id="archive-format" aria-label="压缩格式">
+              <option value="7z">7z（默认）</option>
+              <option value="zip">ZIP</option>
+            </select>
+            <em>格式</em>
+          </label>
+          <label class="compact-number-setting compression-setting">
+            <span><strong>压缩率</strong><small>等级越高越慢；1 保持当前的快速默认值。</small></span>
+            <select id="compression-level" aria-label="压缩率">
+              <option value="0">0 · 不压缩</option>
+              <option value="1" selected>1 · 快速（默认）</option>
+              <option value="3">3 · 标准</option>
+              <option value="5">5 · 较高</option>
+              <option value="7">7 · 高</option>
+              <option value="9">9 · 极限</option>
+            </select>
+            <em>等级</em>
           </label>
           <fieldset class="naming-options">
             <legend>压缩包命名方式</legend>

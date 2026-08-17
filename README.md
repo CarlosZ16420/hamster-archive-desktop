@@ -8,7 +8,7 @@
 
 本地优先 · 批量归档 · 媒体预览 · 便携数据
 
-![Version](https://img.shields.io/badge/version-3.5.0-d45f3c?style=flat-square)
+![Version](https://img.shields.io/badge/version-4.0.0-d45f3c?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-23211d?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-2f7558?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-43-456f83?style=flat-square)
@@ -35,7 +35,7 @@
 把下载目录里堆成山的文件夹和视频，逐个压缩、校验、登记到一个可搜索的本地仓库。普通压缩工具只生成压缩包；Hamster Archive 同时告诉你**里面是什么、放到了哪里、是否已经收过**。
 
 ```text
-扫描 → 清单与查重 → 7-Zip 压缩 → 完整性验证 → 建立仓库记录 → 后处理原文件
+扫描 → 清单与查重 → 7-Zip（7z/ZIP）压缩 → 完整性验证 → 建立仓库记录 → 后处理原文件
 ```
 
 - 主目录中的每个一级文件夹或视频，分别成为一个任务；也可直接拖入单项。
@@ -48,17 +48,23 @@
 
 ![Hamster Archive 四个代表性界面：归档工作台、真实任务队列、仓库概览与大缩略图仓库](docs/images/interface-overview.png)
 
-> 截图由“构造测试目录”中的 9 个演示项目真实扫描、压缩校验并入库后生成；展示路径已替换为演示路径，不包含仓库密码、真实用户配置或个人存档。
+![Hamster Archive 四个代表性界面：归档工作台、真实任务队列、仓库概览与大缩略图仓库](docs/images/detail.png)
+
+
 
 ## 仓库
 
 仓库不是一张压缩包清单。它提供封面浏览、活跃度统计和随机漫步。搜索覆盖标题、标签、备注、路径与文件名；列表分页，目录树按可视区域渲染，适合逐渐增长的库存。
 
+项目中不仅包含了视频、图片的缩略截图，还包含完整的目录结构。每张图片都是恰到好处的缩略图，保存信息的同时也控制自身体积。
+
+视频截取帧数、项目保存缩略图个数等参数均自由可调。
+
 ## 主要能力
 
 ### 安全归档
 
-- 便携版 7-Zip 压缩与 `7z t` 完整性测试。
+- 软件目录内置便携版 7-Zip，支持 7z/ZIP 格式、0—9 压缩等级与 `7z t` 完整性测试。
 - 压缩前清单和源文件复核；无法读取的文件跳过并写入日志。
 - 体积异常不自动入库，可确认保留或只删除异常成品。
 - 多卷成品采用暂存隔离后的原子删除流程，避免只处理一部分分卷。
@@ -121,7 +127,7 @@ npm start
 ## 便携数据布局
 
 ```text
-HamsterArchive-v3.5.0-win-x64/
+HamsterArchive-v4.0.0-win-x64/
 ├─ HamsterArchive.exe
 ├─ tools/
 │  ├─ 7zip/
@@ -145,7 +151,7 @@ HamsterArchive-v3.5.0-win-x64/
 |---|---|
 | 桌面端 | Electron 43、上下文隔离、sandbox、严格 CSP |
 | 数据 | Node 内置 SQLite、WAL、事务、FTS5 |
-| 压缩 | 7-Zip、10 GiB 分卷、可选密码、完整性测试 |
+| 压缩 | 便携版 7-Zip、7z/ZIP、10 GiB 分卷、可选密码、完整性测试 |
 | 媒体 | 单个 FFmpeg 程序完成探测与抽帧 |
 | 性能 | 仓库分页、目录虚拟化、持久化搜索与相似候选索引 |
 | 隐私 | 用户数据留在本机；不上传仓库、媒体或密码 |

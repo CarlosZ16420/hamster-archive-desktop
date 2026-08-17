@@ -590,9 +590,9 @@ function registerIpc() {
   ipcMain.handle('warehouse:import', async (event) => {
     assertTrustedSender(event);
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: '选择外来仓库压缩包或目录',
+      title: '选择外来仓库压缩包',
       defaultPath: queueManager.config.repositoryDirectory,
-      properties: ['openFile', 'openDirectory'],
+      properties: ['openFile'],
       filters: [{ name: '仓库压缩包', extensions: ['zip'] }]
     });
     if (result.canceled) return null;

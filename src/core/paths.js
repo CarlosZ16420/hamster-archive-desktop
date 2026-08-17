@@ -17,10 +17,14 @@ function isPathInside(parent, candidate) {
   return candidatePath === parentPath || candidatePath.startsWith(`${parentPath}${path.sep}`);
 }
 
-function createArchiveName(now = new Date(), randomBytes = crypto.randomBytes) {
+function createArchiveName(now = new Date(), randomBytes = crypto.randomBytes, extension = '7z') {
   const timestamp = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
   const suffix = randomBytes(4).toString('hex');
-  return `arc_${timestamp}_${suffix}.7z`;
+  return `arc_${timestamp}_${suffix}.${extension === 'zip' ? 'zip' : '7z'}`;
+}
+
+function archiveExtension(config = {}) {
+  return String(config.archiveFormat || '7z').toLowerCase() === 'zip' ? 'zip' : '7z';
 }
 
 function validateWindowsFileStem(input, label = '自定义名称') {
@@ -38,22 +42,23 @@ function validateWindowsFileStem(input, label = '自定义名称') {
 
 function createConfiguredArchiveName(displayName, config = {}, randomBytes = crypto.randomBytes, now = new Date()) {
   const mode = config.archiveNamingMode || 'timestamp_random';
+  const extension = archiveExtension(config);
   if (mode === 'original') {
     try {
       const rawStem = path.parse(String(displayName)).name;
       const suffix = randomBytes(4).toString('hex');
       const maxStemLength = Math.max(1, 120 - suffix.length - 1);
       const stem = validateWindowsFileStem(rawStem.slice(0, maxStemLength).replace(/[. ]+$/g, ''), '原文件名');
-      return `${stem}_${suffix}.7z`;
+      return `${stem}_${suffix}.${extension}`;
     } catch {
-      return createArchiveName(now, randomBytes);
+      return createArchiveName(now, randomBytes, extension);
     }
   }
   if (mode === 'custom_random') {
     const stem = validateWindowsFileStem(config.customArchiveName, '自定义名称');
-    return `${stem}_${randomBytes(4).toString('hex')}.7z`;
+    return `${stem}_${randomBytes(4).toString('hex')}.${extension}`;
   }
-  return createArchiveName(now, randomBytes);
+  return createArchiveName(now, randomBytes, extension);
 }
 
 function makeArchiveStagingDirectory(archiveOutputDirectory) {
@@ -110,8 +115,10 @@ function makeDefaultConfig(workspaceRoot, userDataLayout = {}) {
     archiveNamingMode: 'timestamp_random',
     customArchiveName: '',
     videoFrameBackup: true,
-    videoFrameCount: 6,
-    thumbnailLimit: 100,
+    videoFrameCount: 3,
+    thumbnailLimit: 30,
+    archiveFormat: '7z',
+    compressionLevel: 1,
     smallItemFilter: true,
     minimumTaskBytes: 100 * MIB,
     scheduleEnabled: false,

@@ -1,6 +1,6 @@
 {
   "name": "hamster-archive",
-  "version": "3.5.0",
+  "version": "4.0.0",
   "private": true,
   "license": "MIT",
   "description": "仓鼠症大结局：本地归档与备份管理工具",

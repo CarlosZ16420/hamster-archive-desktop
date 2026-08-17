@@ -302,8 +302,10 @@ class QueueManager extends EventEmitter {
       archiveNamingMode: 'timestamp_random',
       customArchiveName: '',
       videoFrameBackup: true,
-      videoFrameCount: 6,
-      thumbnailLimit: 100,
+      videoFrameCount: 3,
+      thumbnailLimit: 30,
+      archiveFormat: '7z',
+      compressionLevel: 1,
       smallItemFilter: true,
       minimumTaskBytes: 100 * MIB,
       scheduleEnabled: false,
@@ -1331,13 +1333,19 @@ class QueueManager extends EventEmitter {
     if (archivePassword.length > 128 || /[\u0000-\u001f\u007f]/.test(archivePassword)) {
       throw new Error('解压密码最多 128 个字符，且不能包含换行或控制字符。留空表示不设置密码。');
     }
-    const videoFrameCount = Number(config.videoFrameCount ?? this.config.videoFrameCount ?? 6);
+    const videoFrameCount = Number(config.videoFrameCount ?? this.config.videoFrameCount ?? 3);
     if (!Number.isInteger(videoFrameCount) || videoFrameCount < 1 || videoFrameCount > 20) {
       throw new Error('每个视频的缩略帧数必须是 1—20 的整数。');
     }
-    const thumbnailLimit = Number(config.thumbnailLimit ?? this.config.thumbnailLimit ?? 100);
+    const thumbnailLimit = Number(config.thumbnailLimit ?? this.config.thumbnailLimit ?? 30);
     if (!Number.isInteger(thumbnailLimit) || thumbnailLimit < 1 || thumbnailLimit > 500) {
       throw new Error('单个项目的缩略图上限必须是 1—500 的整数。');
+    }
+    const archiveFormat = String(config.archiveFormat ?? this.config.archiveFormat ?? '7z').toLowerCase();
+    if (!['7z', 'zip'].includes(archiveFormat)) throw new Error('压缩格式只能选择 7z 或 ZIP。');
+    const compressionLevel = Number(config.compressionLevel ?? this.config.compressionLevel ?? 1);
+    if (!Number.isInteger(compressionLevel) || compressionLevel < 0 || compressionLevel > 9) {
+      throw new Error('压缩率等级必须是 0—9 的整数。');
     }
     const smallItemFilter = Object.prototype.hasOwnProperty.call(config, 'smallItemFilter')
       ? config.smallItemFilter === true
@@ -1376,6 +1384,8 @@ class QueueManager extends EventEmitter {
       backupLocation,
       videoFrameCount,
       thumbnailLimit,
+      archiveFormat,
+      compressionLevel,
       smallItemFilter,
       recordArchivePassword: Boolean(config.recordArchivePassword ?? this.config.recordArchivePassword),
       minimumTaskBytes: Number.isFinite(minimumTaskBytes) ? minimumTaskBytes : 100 * MIB,
@@ -1775,6 +1785,8 @@ class QueueManager extends EventEmitter {
           ].filter(Boolean).join(' · ')
         : '等待压缩',
       archiveBaseName: createConfiguredArchiveName(task.displayName, this.config),
+      archiveFormat: this.config.archiveFormat || '7z',
+      compressionLevel: Number(this.config.compressionLevel ?? 1),
       archivePassword: String(this.config.archivePassword || ''),
       hasPassword: Boolean(this.config.archivePassword),
       recordArchivePassword: Boolean(this.config.recordArchivePassword),
@@ -2249,6 +2261,8 @@ class QueueManager extends EventEmitter {
         ...this.config,
         sevenZipPath: this.resolveProgramPath(this.config.sevenZipPath),
         ffmpegPath: this.resolveProgramPath(this.config.ffmpegPath),
+        archiveFormat: job.archiveFormat || this.config.archiveFormat || '7z',
+        compressionLevel: Number(job.compressionLevel ?? this.config.compressionLevel ?? 1),
         archivePassword: typeof job.archivePassword === 'string'
           ? job.archivePassword
           : String(this.config.archivePassword || '')
@@ -2358,6 +2372,8 @@ class QueueManager extends EventEmitter {
         originalBytes: job.totalBytes,
         archiveBaseName: job.archiveBaseName,
         archiveDirectory: this.config.archiveOutputDirectory,
+        archiveFormat: jobConfig.archiveFormat || this.config.archiveFormat || '7z',
+        compressionLevel: Number(jobConfig.compressionLevel ?? this.config.compressionLevel ?? 1),
         archivePassword: shouldRecordPassword ? jobConfig.archivePassword : '',
         hasPassword: Boolean(jobConfig.archivePassword),
         passwordRecorded: shouldRecordPassword,

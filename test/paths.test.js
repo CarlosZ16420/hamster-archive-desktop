@@ -71,6 +71,13 @@ test('configured archive naming supports original and validated custom names', (
   assert.throws(() => validateWindowsFileStem('CON'), /保留名称/);
 });
 
+test('configured archive naming follows the selected archive format', () => {
+  assert.equal(createConfiguredArchiveName('旅行视频.mp4', {
+    archiveNamingMode: 'original',
+    archiveFormat: 'zip'
+  }, () => Buffer.from('a1b2c3d4', 'hex')), '旅行视频_a1b2c3d4.zip');
+});
+
 test('new installs keep source/output user-selected and default processed inside portable userdata', () => {
   const config = makeDefaultConfig('E:\\program', {
     root: 'C:\\user-data',
@@ -87,6 +94,10 @@ test('new installs keep source/output user-selected and default processed inside
   assert.equal(config.repositoryDirectory, 'C:\\user-data\\warehouse');
   assert.equal(config.archiveStagingDirectory, '');
   assert.equal(config.sevenZipPath, path.join('tools', '7zip', '7z.exe'));
+  assert.equal(config.videoFrameCount, 3);
+  assert.equal(config.thumbnailLimit, 30);
+  assert.equal(config.archiveFormat, '7z');
+  assert.equal(config.compressionLevel, 1);
 });
 
 test('portable tools remain relative and owned user-data paths rebase after moving the app', () => {

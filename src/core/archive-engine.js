@@ -14,10 +14,13 @@ const { buildManifest, collectDirectories, validateManifestUnchanged } = require
 const { validatePathLayout } = require('./paths');
 
 function buildCompressArgs(job, outputPath, password = ARCHIVE_PASSWORD, listFilePath = '') {
+  const format = String(job.archiveFormat || '7z').toLowerCase() === 'zip' ? 'zip' : '7z';
+  const levelValue = Number(job.compressionLevel ?? 1);
+  const level = Number.isInteger(levelValue) && levelValue >= 0 && levelValue <= 9 ? levelValue : 1;
   const args = [
     'a',
-    '-t7z',
-    '-mx=1',
+    `-t${format}`,
+    `-mx=${level}`,
     '-sccUTF-8',
     '-bsp1',
     '-bso1',
@@ -26,7 +29,7 @@ function buildCompressArgs(job, outputPath, password = ARCHIVE_PASSWORD, listFil
     '-y'
   ];
 
-  if (password) args.splice(3, 0, '-mhe=on', `-p${password}`);
+  if (password) args.splice(3, 0, ...(format === '7z' ? ['-mhe=on', `-p${password}`] : [`-p${password}`]));
 
   if (job.totalBytes > LARGE_TASK_BYTES) args.push('-v10g');
   if (listFilePath) args.push('-scsUTF-8', outputPath, `@${listFilePath}`);

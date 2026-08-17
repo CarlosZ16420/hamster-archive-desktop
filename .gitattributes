@@ -23,6 +23,7 @@ userdata/ export-ignore
 config/ export-ignore
 saves/ export-ignore
 nuts/ export-ignore
+nuts-staging/ export-ignore
 processed/ export-ignore
 archive-staging/ export-ignore
 待处理文件/ export-ignore

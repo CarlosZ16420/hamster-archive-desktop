@@ -96,7 +96,7 @@ async function probeVideo(sourcePath, config, options = {}) {
 
 async function extractVideoFrames(sourcePath, outputDirectory, outputStartIndex, requestedCount, config, options = {}) {
   const mediaInfo = await probeVideo(sourcePath, config, options);
-  const count = Math.max(1, Math.min(20, Number(requestedCount) || 6));
+  const count = Math.max(1, Math.min(20, Number(requestedCount) || 3));
   const frames = [];
   for (let index = 0; index < count; index += 1) {
     await options.pauseController?.waitIfPaused(options.signal);

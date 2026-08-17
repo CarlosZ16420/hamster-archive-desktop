@@ -13,7 +13,8 @@ const elements = {
   processedSourceDirectory: document.querySelector('#processed-source-directory'),
   processedSourceDirectoryField: document.querySelector('#processed-source-directory-field'),
   customArchiveName: document.querySelector('#custom-archive-name'),
-  sevenZipPath: document.querySelector('#seven-zip-path'),
+  archiveFormat: document.querySelector('#archive-format'),
+  compressionLevel: document.querySelector('#compression-level'),
   autoTrash: document.querySelector('#auto-trash-completed'),
   recordBackupLocation: document.querySelector('#record-backup-location'),
   backupLocation: document.querySelector('#backup-location'),
@@ -386,7 +387,8 @@ function readConfig() {
     processedSourceDirectory: elements.processedSourceDirectory.value.trim(),
     archiveNamingMode: document.querySelector('input[name="archive-naming-mode"]:checked')?.value || 'timestamp_random',
     customArchiveName: elements.customArchiveName.value.trim(),
-    sevenZipPath: elements.sevenZipPath.value.trim(),
+    archiveFormat: elements.archiveFormat.value,
+    compressionLevel: Number(elements.compressionLevel.value),
     archivePassword: elements.password.value,
     recordArchivePassword: elements.recordArchivePassword.checked,
     videoFrameBackup: elements.videoFrameBackup.checked,
@@ -446,14 +448,15 @@ function renderConfig(config) {
   const namingRadio = document.querySelector(`input[name="archive-naming-mode"][value="${config.archiveNamingMode || 'timestamp_random'}"]`);
   if (namingRadio) namingRadio.checked = true;
   elements.customArchiveName.value = config.customArchiveName || '';
-  elements.sevenZipPath.value = config.sevenZipPath || '';
+  elements.archiveFormat.value = config.archiveFormat || '7z';
+  elements.compressionLevel.value = String(config.compressionLevel ?? 1);
   elements.password.value = config.archivePassword || '';
   elements.recordArchivePassword.checked = config.recordArchivePassword !== false;
-  elements.thumbnailLimit.value = String(config.thumbnailLimit || 100);
+  elements.thumbnailLimit.value = String(config.thumbnailLimit || 30);
   elements.password.type = 'password';
   document.querySelector('#toggle-password').textContent = '显示';
   elements.videoFrameBackup.checked = config.videoFrameBackup !== false;
-  elements.videoFrameCount.value = String(config.videoFrameCount || 6);
+  elements.videoFrameCount.value = String(config.videoFrameCount || 3);
   elements.smallItemFilter.checked = config.smallItemFilter !== false;
   elements.minimumTaskMb.value = String(Math.round((config.minimumTaskBytes || (100 * 1024 ** 2)) / (1024 ** 2)));
   elements.scheduleEnabled.checked = Boolean(config.scheduleEnabled);
@@ -660,6 +663,8 @@ function renderCatalog(catalog) {
       }
       info.append(tags);
     }
+    const sourceLocation = sourceLocationPresentation(record);
+    info.append(make('small', 'source-location-chip', `原文件位置：${sourceLocation.text}`));
     if (record.backupLocation) {
       info.append(make('span', 'backup-location-chip', `备份 · ${record.backupLocation}`));
     }
@@ -1157,7 +1162,7 @@ function isHttpUrl(value) {
 function sourceLocationPresentation(record) {
   const originalPath = String(record.originalSourcePath || record.sourcePath || '').trim();
   if (record.sourceDisposition === 'missing') {
-    return { text: '原文件已消失', value: '', isPath: false };
+    return { text: '未发现原文件', value: '', isPath: false };
   }
   if (record.sourceDisposition === 'trashed') {
     return { text: '源文件已进入回收站', value: '', isPath: false };
@@ -1457,13 +1462,6 @@ elements.archiveOutputDirectory.addEventListener('input', () => {
   elements.archiveStagingDirectory.value = deriveStagingDirectory(elements.archiveOutputDirectory.value);
 });
 
-document.querySelector('#choose-seven-zip').addEventListener('click', async () => {
-  const selected = await safely(() => window.archiveApp.chooseProgram(elements.sevenZipPath.value.trim()));
-  if (!selected) return;
-  elements.sevenZipPath.value = selected;
-  await saveConfig();
-});
-
 document.querySelector('#save-settings').addEventListener('click', saveConfig);
 document.querySelector('#check-for-updates').addEventListener('click', async () => {
   const button = document.querySelector('#check-for-updates');
@@ -1514,6 +1512,8 @@ document.querySelector('#toggle-password').addEventListener('click', () => {
 elements.password.addEventListener('change', () => { void saveConfig(); });
 elements.recordArchivePassword.addEventListener('change', () => { void saveConfig(); });
 elements.thumbnailLimit.addEventListener('change', () => { void saveConfig(); });
+elements.archiveFormat.addEventListener('change', () => { void saveConfig(); });
+elements.compressionLevel.addEventListener('change', () => { void saveConfig(); });
 document.querySelector('#open-user-data').addEventListener('click', async () => {
   const opened = await safely(() => window.archiveApp.openUserData());
   if (opened) showToast('已打开用户数据区');
@@ -1796,7 +1796,7 @@ document.querySelector('#export-warehouse').addEventListener('click', async () =
   if (result) showToast(`仓库压缩包已导出：${result.path}`);
 });
 document.querySelector('#import-warehouse').addEventListener('click', async () => {
-  if (!window.confirm('选择外部仓库压缩包（.zip）或目录后，会把其中的仓库记录、缩略图和解压密码记录一并并入当前仓库。相同 ID 的记录会跳过；外部压缩包实体不会被移动或删除。是否继续？')) return;
+  if (!window.confirm('选择外部仓库压缩包（.zip）后，会把其中的仓库记录、缩略图和解压密码记录一并并入当前仓库。相同 ID 的记录会跳过；外部压缩包实体不会被移动或删除。是否继续？')) return;
   const result = await safely(() => window.archiveApp.importWarehouse());
   if (!result) return;
   render(result.state);
