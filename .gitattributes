@@ -15,6 +15,7 @@ AGENTS.md export-ignore
 docs/private/ export-ignore
 CHANGELOG.md export-ignore
 scripts/sync-public-snapshot.js export-ignore
+docs/REPOSITORY_MAINTENANCE.md export-ignore
 ReadmeGlmversion.md export-ignore
 
 # 本地运行数据、日志、用户资料
