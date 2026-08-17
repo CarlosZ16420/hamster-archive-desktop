@@ -28,6 +28,7 @@ archive-staging/ export-ignore
 待处理文件/ export-ignore
 零碎文件/ export-ignore
 压缩暂存目录/ export-ignore
+构造测试目录/ export-ignore
 logs/ export-ignore
 *.log export-ignore
 

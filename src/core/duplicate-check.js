@@ -97,9 +97,16 @@ function stripSimilarityIgnoreTerms(value, ignoreTerms = []) {
   return result;
 }
 
+function stripDomainNoise(value) {
+  return String(value || '').replace(
+    /(?:https?:\/\/)?(?:www\.)?(?:[a-z0-9](?:[a-z0-9-]{0,62})\.)+[a-z]{2,24}(?=$|[^a-z0-9])/giu,
+    ' '
+  );
+}
+
 function similarityParts(value, ignoreTerms = []) {
   const rawBase = path.parse(String(value || '').normalize('NFKC').toLowerCase()).name;
-  const base = stripSimilarityIgnoreTerms(rawBase, ignoreTerms);
+  const base = stripSimilarityIgnoreTerms(stripDomainNoise(rawBase), ignoreTerms);
   const compact = base.replace(/[^\p{Script=Han}a-z0-9]+/gu, '');
   const han = [...compact].filter((character) => /\p{Script=Han}/u.test(character));
   const latinWords = base.match(/[a-z]{3,}/g) || [];
@@ -111,7 +118,9 @@ function isMeaningfulTitle(value, ignoreTerms = []) {
   if (!parts.compact || GENERIC_TITLES.has(parts.compact)) return false;
   const hanCount = parts.han.length;
   const latinCount = parts.latinWords.join('').length;
-  return hanCount >= 2 || latinCount >= 6 || parts.compact.length >= 6;
+  // 纯数字编号、分隔符和被排除的厂牌词没有语义，不能仅凭数字片段重合判相似。
+  // 完全相同的名称仍由精确名称检查处理，大小和 MD5 检查也不受影响。
+  return hanCount >= 2 || latinCount >= 6;
 }
 
 function videoEntries(subject) {

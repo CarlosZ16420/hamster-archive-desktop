@@ -13,6 +13,7 @@ const {
   rebasePortableUserDataPaths,
   resolveApplicationPath,
   validatePathLayout,
+  validateSourceSelection,
   validateWindowsFileStem
 } = require('../src/core/paths');
 
@@ -43,6 +44,18 @@ test('unsafe source, staging and library nesting is rejected', () => {
     archiveOutputDirectory: 'E:\\work\\library',
     repositoryDirectory: 'E:\\repository'
   }), /互相包含/);
+});
+
+test('source selection can be queued before an output directory is configured', () => {
+  assert.doesNotThrow(() => validateSourceSelection({
+    archiveStagingDirectory: '',
+    archiveOutputDirectory: '',
+    repositoryDirectory: 'E:\\portable-app\\userdata\\warehouse',
+    moveCompleted: false
+  }, 'E:\\incoming\\tiny-folder'));
+  assert.throws(() => validateSourceSelection({
+    archiveOutputDirectory: 'E:\\incoming\\tiny-folder\\packed'
+  }, 'E:\\incoming\\tiny-folder'), /打包后文件存放点/);
 });
 
 test('configured archive naming supports original and validated custom names', () => {

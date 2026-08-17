@@ -126,20 +126,31 @@ function makeDefaultConfig(workspaceRoot, userDataLayout = {}) {
   };
 }
 
+function validateSourceSelection(config, sourcePath = config.intakeDirectory) {
+  if (!sourcePath) throw new Error('请选择需要备份的文件主目录、文件夹或视频。');
+  const checks = [
+    ['archiveStagingDirectory', '暂存目录不能位于所选主目录内部。'],
+    ['archiveOutputDirectory', '打包后文件存放点不能位于所选主目录内部。'],
+    ['repositoryDirectory', '仓库位置不能位于所选主目录内部。']
+  ];
+  for (const [key, message] of checks) {
+    const target = String(config[key] || '').trim();
+    if (target && isPathInside(sourcePath, target)) throw new Error(message);
+  }
+  if (config.moveCompleted && config.processedSourceDirectory) {
+    const processedDirectory = config.processedSourceDirectory;
+    if (isPathInside(sourcePath, processedDirectory) || isPathInside(processedDirectory, sourcePath)) {
+      throw new Error('归档后移动位置不能与源项目互相包含。');
+    }
+  }
+}
+
 function validatePathLayout(config, sourcePath = config.intakeDirectory) {
   const repositoryDirectory = config.repositoryDirectory;
   if (!sourcePath || !config.archiveStagingDirectory || !config.archiveOutputDirectory || !repositoryDirectory) {
     throw new Error('主目录、暂存目录、打包后文件存放点和仓库位置不能为空。');
   }
-  if (isPathInside(sourcePath, config.archiveStagingDirectory)) {
-    throw new Error('暂存目录不能位于所选主目录内部。');
-  }
-  if (isPathInside(sourcePath, config.archiveOutputDirectory)) {
-    throw new Error('打包后文件存放点不能位于所选主目录内部。');
-  }
-  if (isPathInside(sourcePath, repositoryDirectory)) {
-    throw new Error('仓库位置不能位于所选主目录内部。');
-  }
+  validateSourceSelection(config, sourcePath);
   if (isPathInside(config.archiveStagingDirectory, config.archiveOutputDirectory) ||
       isPathInside(config.archiveOutputDirectory, config.archiveStagingDirectory)) {
     throw new Error('暂存目录与库目录不能互相包含。');
@@ -180,5 +191,6 @@ module.exports = {
   rebasePortableUserDataPaths,
   resolveApplicationPath,
   validatePathLayout,
+  validateSourceSelection,
   validateWindowsFileStem
 };

@@ -21,6 +21,7 @@ nuts/
 saves/
 processed/
 BUG1/
+构造测试目录/
 零碎文件/
 .smoke-*/
 .tmp-smoke-*/

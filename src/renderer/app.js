@@ -632,14 +632,13 @@ function renderCatalog(catalog) {
     button.dataset.recordId = record.id;
     const cover = make('div', 'catalog-cover');
     if (record.coverThumbnailPath) {
-      const image = document.createElement('img');
-      image.loading = 'lazy';
-      image.alt = `${catalogTitle(record)} 的首张缩略图`;
-      image.dataset.thumbnailRecord = record.id;
-      image.dataset.thumbnailPath = record.coverThumbnailPath;
-      image.dataset.thumbnailTitle = catalogTitle(record);
-      cover.append(image);
-      void loadThumbnail(image, record.id, record.coverThumbnailPath);
+      appendContainedThumbnail(
+        cover,
+        record.id,
+        record.coverThumbnailPath,
+        catalogTitle(record),
+        'catalog-cover-frame'
+      );
     } else {
       cover.append(make('span', 'catalog-cover-placeholder', record.recordType === 'manual' ? '手动库存' : '无预览'));
     }
@@ -778,6 +777,29 @@ async function loadThumbnail(image, recordId, relativePath) {
   const dataUrl = await safely(() => window.archiveApp.getThumbnail(recordId, relativePath));
   if (dataUrl) image.src = dataUrl;
   return dataUrl;
+}
+
+function appendContainedThumbnail(container, recordId, relativePath, title, frameClass = '') {
+  const frame = make('div', `contained-thumbnail-frame${frameClass ? ` ${frameClass}` : ''}`);
+  const backdrop = document.createElement('img');
+  backdrop.className = 'contained-thumbnail-image contained-thumbnail-backdrop';
+  backdrop.alt = '';
+  backdrop.setAttribute('aria-hidden', 'true');
+
+  const image = document.createElement('img');
+  image.className = 'contained-thumbnail-image contained-thumbnail-foreground';
+  image.loading = 'lazy';
+  image.alt = title;
+  image.dataset.thumbnailRecord = recordId;
+  image.dataset.thumbnailPath = relativePath;
+  image.dataset.thumbnailTitle = title;
+  frame.append(backdrop, image);
+  container.append(frame);
+
+  void loadThumbnail(image, recordId, relativePath).then((dataUrl) => {
+    if (dataUrl) backdrop.src = dataUrl;
+  });
+  return image;
 }
 
 function thumbnailsForFile(file) {
@@ -1271,16 +1293,9 @@ function renderCatalogDetail(record) {
       if (thumbnails.length === 1) {
         const thumbnail = thumbnails[0];
         const card = make('div', 'thumbnail-card');
-        const image = document.createElement('img');
-        image.loading = 'lazy';
-        image.alt = file.name;
-        image.dataset.thumbnailRecord = record.id;
-        image.dataset.thumbnailPath = thumbnail.ref;
-        image.dataset.thumbnailTitle = file.name;
-        if (thumbnail.type === 'video-frame') image.classList.add('video-frame-image');
-        card.append(image, make('span', '', thumbnail.label));
+        appendContainedThumbnail(card, record.id, thumbnail.ref, file.name, 'thumbnail-card-frame');
+        card.append(make('span', '', thumbnail.label));
         imageGallery.append(card);
-        void loadThumbnail(image, record.id, thumbnail.ref);
         continue;
       }
       const group = make('section', thumbnails.length > 1 ? 'thumbnail-group video-thumbnail-group' : 'thumbnail-group');
@@ -1296,16 +1311,10 @@ function renderCatalogDetail(record) {
       const gallery = make('div', 'thumbnail-gallery');
       for (const thumbnail of thumbnails) {
         const card = make('div', 'thumbnail-card');
-        const image = document.createElement('img');
-        image.loading = 'lazy';
-        image.alt = file.name;
-        image.dataset.thumbnailRecord = record.id;
-        image.dataset.thumbnailPath = thumbnail.ref;
-        image.dataset.thumbnailTitle = thumbnails.length > 1 ? `${file.name} · ${thumbnail.label}` : file.name;
-        if (thumbnail.type === 'video-frame') image.classList.add('video-frame-image');
-        card.append(image, make('span', '', thumbnail.label));
+        const title = thumbnails.length > 1 ? `${file.name} · ${thumbnail.label}` : file.name;
+        appendContainedThumbnail(card, record.id, thumbnail.ref, title, 'thumbnail-card-frame');
+        card.append(make('span', '', thumbnail.label));
         gallery.append(card);
-        void loadThumbnail(image, record.id, thumbnail.ref);
       }
       group.append(gallery);
       mediaSection.append(group);

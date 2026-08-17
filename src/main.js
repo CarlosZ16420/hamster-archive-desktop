@@ -21,6 +21,8 @@ const { extractVideoFrames } = require('./core/media-service');
 const { checkForUpdates } = require('./core/update-checker');
 const { findTrashItems, isTrashItemPresent, restoreTrashItem } = require('./core/recycle-bin');
 
+const appIconPath = path.join(__dirname, '..', 'assets', 'app-icon.png');
+
 let mainWindow;
 let queueManager;
 let appStore;
@@ -31,6 +33,15 @@ let sourceAuditTimer = null;
 let sourceAuditStartupTimer = null;
 let lastCatalogPushSignature = '';
 const isSmokeTest = process.env.HAMSTER_SMOKE_TEST === '1';
+if (isSmokeTest) {
+  // Electron may outlive the test runner's captured output pipe for a few milliseconds.
+  // A closed diagnostic pipe must not surface as a main-process JavaScript error dialog.
+  for (const stream of [process.stdout, process.stderr]) {
+    stream?.on?.('error', (error) => {
+      if (error?.code !== 'EPIPE') process.exitCode = 1;
+    });
+  }
+}
 const applicationRoot = isSmokeTest && process.env.HAMSTER_SMOKE_USER_DATA_DIR
   ? path.join(path.resolve(process.env.HAMSTER_SMOKE_USER_DATA_DIR), 'portable-root')
   : app.isPackaged ? path.dirname(app.getPath('exe')) : path.resolve(__dirname, '..');
@@ -44,6 +55,7 @@ if (isSmokeTest) {
   app.commandLine.appendSwitch('disable-gpu-compositing');
 }
 const hasSingleInstanceLock = isSmokeTest || app.requestSingleInstanceLock();
+app.setAppUserModelId('com.carlosz.hamsterarchive');
 
 function catalogPushSignature(catalog) {
   return JSON.stringify((catalog || []).map((record) => [
@@ -178,12 +190,13 @@ function assertTrustedSender(event) {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    show: process.env.HAMSTER_SMOKE_TEST !== '1',
+    show: process.env.HAMSTER_SMOKE_TEST !== '1' || process.env.HAMSTER_SMOKE_SHOW === '1',
     width: 1280,
     height: 860,
     minWidth: 980,
     minHeight: 680,
     title: '仓鼠症大结局',
+    icon: appIconPath,
     backgroundColor: '#f3efe7',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -326,13 +339,39 @@ function createWindow() {
           await fs.writeFile(process.env.HAMSTER_SMOKE_OVERVIEW_SCREENSHOT, overviewImage.toPNG());
         }
         if (process.env.HAMSTER_SMOKE_GRID_SCREENSHOT) {
-          await mainWindow.webContents.executeJavaScript(`document.querySelector('#library-layout')?.scrollIntoView({ block: 'start' })`);
-          await new Promise((resolve) => setTimeout(resolve, 250));
+          await mainWindow.webContents.executeJavaScript(`(() => {
+            if (${process.env.HAMSTER_README_DEMO === '1'}) {
+              const warehousePath = document.querySelector('#warehouse-path');
+              if (warehousePath) {
+                warehousePath.textContent = '仓库：D:\\\\HamsterArchive\\\\userdata\\\\warehouse';
+                warehousePath.title = 'D:\\\\HamsterArchive\\\\userdata\\\\warehouse';
+              }
+            }
+            const overview = document.querySelector('.warehouse-overview');
+            if (overview) overview.style.display = 'none';
+            const layout = document.querySelector('.library-title') || document.querySelector('#library-layout');
+            if (!layout) return;
+            document.documentElement.style.scrollBehavior = 'auto';
+            window.scrollTo(0, Math.max(0, layout.getBoundingClientRect().top + window.scrollY - 18));
+          })()`);
+          for (let attempt = 0; attempt < 20; attempt += 1) {
+            const readyCoverCount = await mainWindow.webContents.executeJavaScript(`
+              [...document.querySelectorAll('.catalog-cover .contained-thumbnail-foreground')]
+                .filter((image) => image.complete && image.naturalWidth > 0).length
+            `);
+            if (readyCoverCount >= 8) break;
+            await new Promise((resolve) => setTimeout(resolve, 150));
+          }
+          await mainWindow.webContents.executeJavaScript(`Promise.all(
+            [...document.querySelectorAll('.catalog-cover .contained-thumbnail-foreground')]
+              .map((image) => image.decode().catch(() => null))
+          )`);
+          await new Promise((resolve) => setTimeout(resolve, 1200));
           const gridImage = await mainWindow.webContents.capturePage();
           await fs.mkdir(path.dirname(process.env.HAMSTER_SMOKE_GRID_SCREENSHOT), { recursive: true });
           await fs.writeFile(process.env.HAMSTER_SMOKE_GRID_SCREENSHOT, gridImage.toPNG());
         }
-        await mainWindow.webContents.executeJavaScript(`document.querySelector('.catalog-cover img')?.click()`);
+        await mainWindow.webContents.executeJavaScript(`document.querySelector('.catalog-cover .contained-thumbnail-foreground')?.click()`);
         await new Promise((resolve) => setTimeout(resolve, 300));
         const cardLightboxStatus = await mainWindow.webContents.executeJavaScript(`({
           open: Boolean(document.querySelector('#thumbnail-lightbox')?.open),
@@ -350,7 +389,7 @@ function createWindow() {
         await mainWindow.webContents.executeJavaScript(`document.querySelector('#set-thumbnail-cover')?.click()`);
         await new Promise((resolve) => setTimeout(resolve, 600));
         const coverState = await mainWindow.webContents.executeJavaScript(`window.archiveApp.getState().then((state) => {
-          const record = state.catalog.find((item) => item.id === 'smoke-record');
+          const record = state.catalog.find((item) => item.id === activeCatalogId);
           return { coverRelativePath: record?.coverRelativePath, coverThumbnailRef: record?.coverThumbnailRef, coverThumbnailPath: record?.coverThumbnailPath };
         })`);
         await mainWindow.webContents.executeJavaScript(`document.querySelector('#close-thumbnail-lightbox')?.click()`);
@@ -360,11 +399,19 @@ function createWindow() {
           hasEditor: Boolean(document.querySelector('.catalog-editor-form')),
           hasGridMode: document.querySelector('#library-layout')?.classList.contains('grid-mode'),
           coverImages: document.querySelectorAll('.catalog-cover img[src]').length,
+          hasContainedCover: Boolean(
+            document.querySelector('.catalog-cover .contained-thumbnail-backdrop[src]') &&
+            document.querySelector('.catalog-cover .contained-thumbnail-foreground[src]') &&
+            getComputedStyle(document.querySelector('.catalog-cover .contained-thumbnail-foreground')).objectFit === 'contain' &&
+            document.querySelector('.catalog-cover .catalog-cover-frame')?.getBoundingClientRect().width > 0 &&
+            document.querySelector('.catalog-cover .catalog-cover-frame')?.getBoundingClientRect().height > 0
+          ),
           hasFileBadge: Boolean(document.querySelector('.file-count-badge')),
           hasCatalogCheckbox: Boolean(document.querySelector('.catalog-select')),
           hasBulkToolbar: Boolean(document.querySelector('.warehouse-bulkbar')),
           hasInventoryDate: document.querySelector('#catalog-detail')?.innerText.includes('入库日期'),
-          hasBackupFilter: document.querySelectorAll('#catalog-backup-filter option').length >= 2,
+          hasBackupFilter: document.querySelectorAll('#catalog-backup-filter option').length >=
+            (${process.env.HAMSTER_SMOKE_REAL_CATALOG === '1' || Boolean(process.env.HAMSTER_SMOKE_IMPORT_DIRECTORY) ? 1 : 2}),
           hasBackupSetting: Boolean(document.querySelector('#record-backup-location') && document.querySelector('#backup-location')),
           hasNewControls: Boolean(document.querySelector('#finish-next') && document.querySelector('#clear-duplicates') &&
             document.querySelector('#clear-completed') && document.querySelector('#open-usage-guide') &&
@@ -387,14 +434,22 @@ function createWindow() {
           hasBackupText: document.querySelector('#catalog-detail')?.innerText.includes('百度网盘'),
           dotArtCount: document.querySelectorAll('[data-dot-art], .dot-art').length,
           thumbnailImages: document.querySelectorAll('.thumbnail-card img[src]').length,
+          hasContainedDetailImage: Boolean(
+            document.querySelector('.thumbnail-card .contained-thumbnail-backdrop[src]') &&
+            document.querySelector('.thumbnail-card .contained-thumbnail-foreground[src]') &&
+            getComputedStyle(document.querySelector('.thumbnail-card .contained-thumbnail-foreground')).objectFit === 'contain'
+          ),
           virtualTreeRows: document.querySelectorAll('.virtual-tree-row').length,
+          virtualTreeCanvasHeight: Number.parseInt(document.querySelector('.virtual-directory-canvas')?.style.height || '0', 10),
           detailText: document.querySelector('#catalog-detail')?.innerText.slice(0, 120)
         })`);
         console.log(`HAMSTER_LIBRARY_TEST ${JSON.stringify({ ...libraryStatus, manualDialogStatus, activityStatus, defaultRandomCount, randomWalkCount, cardLightboxStatus, detailLightboxOpen, selectedCoverPath, coverState })}`);
         if (!libraryStatus.hasHeading || !libraryStatus.hasTree || !libraryStatus.hasEditor ||
-            !libraryStatus.hasGridMode || libraryStatus.coverImages < 1 || !libraryStatus.hasFileBadge ||
+            !libraryStatus.hasGridMode || libraryStatus.coverImages < 1 || !libraryStatus.hasContainedCover ||
+            !libraryStatus.hasFileBadge ||
             !libraryStatus.hasCatalogCheckbox || !libraryStatus.hasBulkToolbar || !libraryStatus.hasInventoryDate ||
-            !libraryStatus.hasBackupFilter || !libraryStatus.hasBackupSetting || !libraryStatus.hasBackupText ||
+            !libraryStatus.hasBackupFilter || !libraryStatus.hasBackupSetting ||
+            (!process.env.HAMSTER_SMOKE_IMPORT_DIRECTORY && process.env.HAMSTER_SMOKE_REAL_CATALOG !== '1' && !libraryStatus.hasBackupText) ||
             !libraryStatus.hasNewControls || !libraryStatus.passwordHidden || !libraryStatus.inlineBulkTagRemoved ||
             !libraryStatus.bulkPasswordRemoved || !libraryStatus.passwordEditorReadOnly ||
             !libraryStatus.hasNoTreeBulkButtons || !libraryStatus.hasNoDailyReview ||
@@ -406,7 +461,8 @@ function createWindow() {
             !cardLightboxStatus.open || !cardLightboxStatus.hasImage || !cardLightboxStatus.hasCoverButton ||
             !detailLightboxOpen || !selectedCoverPath || coverState.coverThumbnailRef !== selectedCoverPath ||
             coverState.coverThumbnailPath !== selectedCoverPath ||
-            libraryStatus.dotArtCount !== 0 || libraryStatus.thumbnailImages < 1 || libraryStatus.virtualTreeRows < 1) {
+            libraryStatus.dotArtCount !== 0 || libraryStatus.thumbnailImages < 1 ||
+            !libraryStatus.hasContainedDetailImage || libraryStatus.virtualTreeCanvasHeight < 1) {
           console.error('HAMSTER_LIBRARY_TEST_FAILED');
           app.exitCode = 1;
           app.quit();
@@ -414,12 +470,27 @@ function createWindow() {
         }
       }
       if (process.env.HAMSTER_SCREENSHOT_PATH) {
+        if (process.env.HAMSTER_README_DEMO === '1') {
+          await mainWindow.webContents.executeJavaScript(`(() => {
+            const intakePath = document.querySelector('#intake-directory');
+            if (intakePath) intakePath.value = 'D:\\\\HamsterArchive\\\\incoming';
+            for (const row of document.querySelectorAll('#task-list tr')) {
+              const name = row.querySelector('.task-name strong')?.textContent || 'project';
+              const sourcePath = row.querySelector('.task-name small');
+              if (sourcePath) sourcePath.textContent = 'D:\\\\HamsterArchive\\\\incoming\\\\' + name;
+            }
+          })()`);
+        }
         if (process.env.HAMSTER_SMOKE_ADVANCED === '1') {
           await mainWindow.webContents.executeJavaScript(`
             const advanced = document.querySelector('details.advanced');
             if (advanced) {
               advanced.open = true;
               advanced.scrollIntoView({ block: 'start' });
+            }
+            if (${process.env.HAMSTER_README_DEMO === '1'}) {
+              const userDataPath = document.querySelector('#user-data-path');
+              if (userDataPath) userDataPath.value = 'D:\\\\HamsterArchive\\\\userdata';
             }
           `);
         }
@@ -428,6 +499,15 @@ function createWindow() {
             document.querySelectorAll('dialog[open]').forEach((dialogElement) => dialogElement.close());
             window.scrollTo(0, 0);
           `);
+        }
+        if (process.env.HAMSTER_SMOKE_SCREENSHOT_SELECTOR) {
+          await mainWindow.webContents.executeJavaScript(`(() => {
+            const target = document.querySelector(${JSON.stringify(process.env.HAMSTER_SMOKE_SCREENSHOT_SELECTOR)});
+            if (!target) return;
+            document.documentElement.style.scrollBehavior = 'auto';
+            window.scrollTo(0, Math.max(0, target.getBoundingClientRect().top + window.scrollY - 18));
+          })()`);
+          await new Promise((resolve) => setTimeout(resolve, 500));
         }
         await new Promise((resolve) => setTimeout(resolve, 300));
         const image = await mainWindow.webContents.capturePage();
@@ -813,6 +893,52 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     resolveProgramPath: (configuredPath) => resolveApplicationPath(workspaceRoot, configuredPath)
   });
   await queueManager.initialize();
+  if (isSmokeTest && process.env.HAMSTER_SMOKE_IMPORT_DIRECTORY) {
+    const importDirectory = path.resolve(process.env.HAMSTER_SMOKE_IMPORT_DIRECTORY);
+    const smokeToolRoot = process.env.HAMSTER_SMOKE_TOOL_ROOT
+      ? path.resolve(process.env.HAMSTER_SMOKE_TOOL_ROOT)
+      : null;
+    if (!process.env.HAMSTER_SMOKE_LIBRARY_DIR) {
+      throw new Error('真实项目入库验收必须指定隔离的成品目录。');
+    }
+    await queueManager.updateConfig({
+      intakeDirectory: importDirectory,
+      archiveOutputDirectory: path.resolve(process.env.HAMSTER_SMOKE_LIBRARY_DIR),
+      ...(smokeToolRoot ? {
+        sevenZipPath: path.join(smokeToolRoot, PORTABLE_SEVEN_ZIP_PATH),
+        ffmpegPath: path.join(smokeToolRoot, PORTABLE_FFMPEG_PATH)
+      } : {}),
+      archivePassword: '',
+      archiveNamingMode: 'original',
+      videoFrameBackup: true,
+      videoFrameCount: 6,
+      thumbnailLimit: 100,
+      smallItemFilter: false,
+      minimumTaskBytes: 0,
+      scheduleEnabled: false,
+      moveCompleted: false,
+      autoTrashCompleted: false,
+      recordBackupLocation: false,
+      backupLocation: ''
+    });
+    await queueManager.scanSource(importDirectory);
+    for (let cycle = 0; cycle < 4; cycle += 1) {
+      await queueManager.confirmAllDuplicateJobs();
+      await queueManager.startQueue();
+      const pendingDuplicate = queueManager.jobs.some((job) => [
+        'awaiting_confirmation', 'awaiting_duplicate_confirmation'
+      ].includes(job.status));
+      if (!pendingDuplicate) break;
+    }
+    for (const job of queueManager.jobs.filter((candidate) => candidate.status === 'awaiting_anomaly_confirmation')) {
+      await queueManager.confirmAnomaly(job.id);
+    }
+    const incomplete = queueManager.jobs.filter((job) => !String(job.status).startsWith('completed'));
+    if (incomplete.length > 0 || queueManager.catalog.length === 0) {
+      throw new Error(`真实项目入库验收未完成：${incomplete.map((job) => `${job.displayName}:${job.status}`).join('，')}`);
+    }
+    console.log(`HAMSTER_IMPORT_TEST_OK ${JSON.stringify({ jobs: queueManager.jobs.length, catalog: queueManager.catalog.length })}`);
+  }
   scheduleTimer = setInterval(() => {
     void queueManager.handleScheduleTick().catch((error) => console.error('SCHEDULE_ERROR', error));
   }, 15_000);

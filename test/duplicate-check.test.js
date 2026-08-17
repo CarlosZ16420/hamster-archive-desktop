@@ -2,7 +2,15 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { findExactFileMatches, findSimilarProjects, findTaskNameMatches, fuzzyTextScore, normalizeName, titleSimilarity } = require('../src/core/duplicate-check');
+const {
+  findExactFileMatches,
+  findSimilarProjects,
+  findTaskNameMatches,
+  fuzzyTextScore,
+  normalizeName,
+  similarityCandidateKeys,
+  titleSimilarity
+} = require('../src/core/duplicate-check');
 
 test('name normalization supports simple suspected duplicate checks', () => {
   assert.equal(normalizeName('示例 目录_01.mp4'), normalizeName('示例-目录 01.MP4'));
@@ -60,4 +68,37 @@ test('similarity ignore terms remove common maker-name noise without changing ex
   }], ['FC2', 'PPV']);
   assert.equal(matches.length, 1);
   assert.ok(matches[0].reasons.includes('视频大小完全一致'));
+});
+
+test('ignored FC2 identifiers and shared download domains never create title similarity', () => {
+  const names = [
+    'FC2-PPV-4768873',
+    'FC2-PPV-3275005',
+    'FC2-PPV-4694056',
+    'FC2-PPV-4721502',
+    'FC2-PPV-4723700'
+  ];
+  const records = names.map((title, index) => ({
+    id: `fc2-${index}`,
+    title,
+    displayName: title,
+    sourceType: 'directory',
+    manifest: [{
+      name: `hhd800.com@${title}${index % 2 === 0 ? '' : '_1'}.mp4`,
+      extension: '.mp4',
+      size: 1_000_000 + index
+    }]
+  }));
+
+  for (let left = 0; left < records.length; left += 1) {
+    assert.equal(
+      similarityCandidateKeys(records[left], ['FC2', 'PPV'])
+        .some((key) => key.startsWith('text:') || key.startsWith('word:')),
+      false
+    );
+    for (let right = left + 1; right < records.length; right += 1) {
+      assert.equal(titleSimilarity(names[left], names[right], ['FC2', 'PPV']), 0);
+      assert.deepEqual(findSimilarProjects(records[left], [records[right]], ['FC2', 'PPV']), []);
+    }
+  }
 });

@@ -14,6 +14,7 @@ const {
   makeArchiveStagingDirectory,
   normalizeForComparison,
   validatePathLayout,
+  validateSourceSelection,
   validateWindowsFileStem
 } = require('./paths');
 const { inspectPath, scanIntakeDirectory } = require('./scanner');
@@ -28,6 +29,8 @@ const {
   similarityCandidateKeys
 } = require('./duplicate-check');
 const { PauseController } = require('./process-controller');
+
+const SIMILARITY_VERSION = 3;
 
 function normalizeCatalogMetadata(record) {
   const inventoryDate = record.inventoryDate || record.completedAt || record.verifiedAt || new Date().toISOString();
@@ -360,7 +363,7 @@ class QueueManager extends EventEmitter {
     this.catalog = relocatedCatalog.map(normalizeCatalogMetadata);
     // 每次启动只做哈希对比；数据库升级后可在不重写 JSON 的情况下补齐持久化候选索引。
     await this.store.saveCatalog(this.config.repositoryDirectory, this.catalog);
-    const similarityUpgradeNeeded = this.catalog.some((record) => record.similarityVersion !== 2);
+    const similarityUpgradeNeeded = this.catalog.some((record) => record.similarityVersion !== SIMILARITY_VERSION);
     if (similarityUpgradeNeeded) this.rebuildAllSimilarityRelations();
     if (this.catalog.some((record, index) =>
       record.title !== relocatedCatalog[index].title ||
@@ -804,7 +807,7 @@ class QueueManager extends EventEmitter {
         return candidate && !similarityIsDismissed(record, candidate);
       });
     record.similarRecords = matches;
-    record.similarityVersion = 2;
+    record.similarityVersion = SIMILARITY_VERSION;
     record.possibleDuplicate = Boolean(record.duplicateEvidence || matches.length > 0);
     for (const match of matches) {
       const candidate = this.catalog.find((item) => item.id === match.id);
@@ -820,14 +823,14 @@ class QueueManager extends EventEmitter {
         reciprocal
       ].sort((a, b) => b.score - a.score).slice(0, 20);
       candidate.possibleDuplicate = Boolean(candidate.duplicateEvidence || candidate.similarRecords.length > 0);
-      candidate.similarityVersion = 2;
+      candidate.similarityVersion = SIMILARITY_VERSION;
     }
   }
 
   rebuildAllSimilarityRelations() {
     for (const record of this.catalog) {
       record.similarRecords = [];
-      record.similarityVersion = 2;
+      record.similarityVersion = SIMILARITY_VERSION;
       record.possibleDuplicate = Boolean(record.duplicateEvidence);
     }
     const catalogOrder = new Map(this.catalog.map((record, index) => [record.id, index]));
@@ -1336,8 +1339,11 @@ class QueueManager extends EventEmitter {
     if (!Number.isInteger(thumbnailLimit) || thumbnailLimit < 1 || thumbnailLimit > 500) {
       throw new Error('单个项目的缩略图上限必须是 1—500 的整数。');
     }
+    const smallItemFilter = Object.prototype.hasOwnProperty.call(config, 'smallItemFilter')
+      ? config.smallItemFilter === true
+      : this.config.smallItemFilter === true;
     const minimumTaskBytes = Number(config.minimumTaskBytes ?? this.config.minimumTaskBytes ?? (100 * MIB));
-    if (!Number.isFinite(minimumTaskBytes) || minimumTaskBytes < MIB || minimumTaskBytes > 100 * 1024 * MIB) {
+    if (smallItemFilter && (!Number.isFinite(minimumTaskBytes) || minimumTaskBytes < MIB || minimumTaskBytes > 100 * 1024 * MIB)) {
       throw new Error('小文件过滤阈值必须在 1 MB—100 GB 之间。');
     }
     const scheduleStart = String(config.scheduleStart ?? this.config.scheduleStart ?? '');
@@ -1370,8 +1376,9 @@ class QueueManager extends EventEmitter {
       backupLocation,
       videoFrameCount,
       thumbnailLimit,
+      smallItemFilter,
       recordArchivePassword: Boolean(config.recordArchivePassword ?? this.config.recordArchivePassword),
-      minimumTaskBytes,
+      minimumTaskBytes: Number.isFinite(minimumTaskBytes) ? minimumTaskBytes : 100 * MIB,
       scheduleStart,
       scheduleEnd,
       archiveNamingMode,
@@ -1782,7 +1789,7 @@ class QueueManager extends EventEmitter {
 
   async scanSource(intakeDirectory = this.config.intakeDirectory) {
     if (this.running) throw new Error('队列运行期间不能重新扫描。');
-    validatePathLayout(this.config, intakeDirectory);
+    validateSourceSelection(this.config, intakeDirectory);
     await this.log('info', `开始扫描主目录：${intakeDirectory}`);
     const result = await scanIntakeDirectory(intakeDirectory, {
       minimumBytes: this.config.smallItemFilter ? this.config.minimumTaskBytes : 0,
@@ -1827,7 +1834,7 @@ class QueueManager extends EventEmitter {
 
   async addSingle(sourcePath) {
     if (this.running) throw new Error('队列运行期间不能添加单项。');
-    validatePathLayout(this.config, sourcePath);
+    validateSourceSelection(this.config, sourcePath);
     const stats = await require('node:fs/promises').stat(sourcePath);
     let sourceType;
     if (stats.isDirectory()) sourceType = 'directory';

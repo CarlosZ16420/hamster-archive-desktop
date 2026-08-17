@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const packageJson = require('../package.json');
+const { embedWindowsIcon } = require('./embed-windows-icon');
 
 const projectRoot = path.resolve(__dirname, '..');
 const electronDist = path.join(projectRoot, 'node_modules', 'electron', 'dist');
@@ -23,7 +24,9 @@ async function main() {
   }
   for (const requiredTool of [
     path.join(projectRoot, 'tools', '7zip', '7z.exe'),
-    path.join(projectRoot, 'tools', 'ffmpeg', 'ffmpeg.exe')
+    path.join(projectRoot, 'tools', 'ffmpeg', 'ffmpeg.exe'),
+    path.join(projectRoot, 'assets', 'app-icon.png'),
+    path.join(projectRoot, 'assets', 'app-icon.ico')
   ]) {
     if (!(await exists(requiredTool))) throw new Error(`发布包缺少必需工具：${requiredTool}`);
   }
@@ -32,11 +35,16 @@ async function main() {
   await fs.mkdir(path.dirname(outputRoot), { recursive: true });
   await fs.cp(electronDist, outputRoot, { recursive: true });
   await fs.rename(path.join(outputRoot, 'electron.exe'), path.join(outputRoot, 'HamsterArchive.exe'));
+  await embedWindowsIcon(
+    path.join(outputRoot, 'HamsterArchive.exe'),
+    path.join(projectRoot, 'assets', 'app-icon.ico')
+  );
   await fs.rm(path.join(outputRoot, 'resources', 'default_app.asar'), { force: true });
 
   const appDirectory = path.join(outputRoot, 'resources', 'app');
   await fs.mkdir(appDirectory, { recursive: true });
   await fs.cp(path.join(projectRoot, 'src'), path.join(appDirectory, 'src'), { recursive: true });
+  await fs.cp(path.join(projectRoot, 'assets'), path.join(appDirectory, 'assets'), { recursive: true });
   const outputTools = path.join(outputRoot, 'tools');
   await fs.mkdir(outputTools, { recursive: true });
   await fs.cp(path.join(projectRoot, 'tools', '7zip'), path.join(outputTools, '7zip'), { recursive: true });

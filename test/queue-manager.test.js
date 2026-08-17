@@ -229,6 +229,43 @@ test('thumbnail limit is configurable within a bounded range', async () => {
   await assert.rejects(manager.updateConfig({ thumbnailLimit: 501 }), /1—500/);
 });
 
+test('disabled small-item filtering accepts tiny folders before output setup', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-tiny-queue-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const tinyFolder = path.join(root, 'tiny-folder');
+  await fs.mkdir(tinyFolder);
+  await fs.writeFile(path.join(tinyFolder, 'tiny.txt'), 'tiny');
+
+  const manager = new QueueManager(new FakeStore(), {
+    archiveOutputDirectory: '',
+    archiveStagingDirectory: '',
+    repositoryDirectory: path.join(root, 'warehouse'),
+    moveCompleted: false,
+    smallItemFilter: true,
+    minimumTaskBytes: 100 * 1024 * 1024
+  });
+  await manager.updateConfig({ smallItemFilter: false, minimumTaskBytes: 0 });
+  await manager.addSingle(tinyFolder);
+
+  assert.equal(manager.config.smallItemFilter, false);
+  assert.equal(manager.jobs.length, 1);
+  assert.equal(manager.jobs[0].displayName, 'tiny-folder');
+  assert.equal(manager.jobs[0].totalBytes, 4);
+
+  const scanRepository = path.join(path.dirname(root), `${path.basename(root)}-warehouse`);
+  const scanManager = new QueueManager(new FakeStore(), {
+    archiveOutputDirectory: '',
+    archiveStagingDirectory: '',
+    repositoryDirectory: scanRepository,
+    moveCompleted: false,
+    smallItemFilter: false,
+    minimumTaskBytes: 100 * 1024 * 1024
+  });
+  await scanManager.scanSource(root);
+  assert.deepEqual(scanManager.jobs.map((job) => job.displayName), ['tiny-folder']);
+  assert.deepEqual(scanManager.skippedRootFiles, []);
+});
+
 test('catalog fuzzy search ranks matches and supports time and filename sorting', () => {
   const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' });
   manager.catalog = [
@@ -289,6 +326,37 @@ test('similar project links can be recalculated and dismissed symmetrically', as
   manager.rebuildAllSimilarityRelations();
   assert.deepEqual(manager.catalog[0].similarRecords, []);
   assert.deepEqual(manager.catalog[1].similarRecords, []);
+});
+
+test('similarity version upgrade removes stale domain-only FC2 relations', async () => {
+  class SimilarityUpgradeStore extends FakeStore {
+    async loadCatalog() {
+      return [
+        {
+          id: 'fc2-a', title: 'FC2-PPV-4768873', displayName: 'FC2-PPV-4768873',
+          similarityVersion: 2, possibleDuplicate: true,
+          similarRecords: [{ id: 'fc2-b', title: 'FC2-PPV-4723700', score: 0.827, reasons: ['包含标题相似的视频'] }],
+          manifest: [{ name: 'hhd800.com@FC2-PPV-4768873.mp4', extension: '.mp4', size: 1001 }],
+          directories: [], tags: []
+        },
+        {
+          id: 'fc2-b', title: 'FC2-PPV-4723700', displayName: 'FC2-PPV-4723700',
+          similarityVersion: 2, possibleDuplicate: true,
+          similarRecords: [{ id: 'fc2-a', title: 'FC2-PPV-4768873', score: 0.827, reasons: ['包含标题相似的视频'] }],
+          manifest: [{ name: 'hhd800.com@FC2-PPV-4723700.mp4', extension: '.mp4', size: 1002 }],
+          directories: [], tags: []
+        }
+      ];
+    }
+    async saveCatalog(_directory, records) { this.catalog = structuredClone(records); }
+  }
+  const store = new SimilarityUpgradeStore();
+  const manager = new QueueManager(store, { repositoryDirectory: 'E:\\library' });
+  await manager.initialize();
+  assert.deepEqual(manager.catalog.map((record) => record.similarRecords), [[], []]);
+  assert.deepEqual(manager.catalog.map((record) => record.similarityVersion), [3, 3]);
+  assert.deepEqual(manager.catalog.map((record) => record.possibleDuplicate), [false, false]);
+  assert.deepEqual(store.catalog.map((record) => record.similarRecords), [[], []]);
 });
 
 test('legacy catalog records receive an empty hidden original source location', async () => {

@@ -1,12 +1,14 @@
 <div align="center">
 
-# 🐹 仓鼠症大结局
+<img src="assets/app-icon.png" alt="Hamster Archive 图标" width="112">
+
+# 仓鼠症大结局 Hamster Archive
 
 ### 把散乱的大文件变成可校验的压缩包，也变成能搜索、能预览的本地仓库
 
 本地优先 · 批量归档 · 媒体预览 · 便携数据
 
-![Version](https://img.shields.io/badge/version-3.0.0-d45f3c?style=flat-square)
+![Version](https://img.shields.io/badge/version-3.5.0-d45f3c?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-23211d?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-2f7558?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-43-456f83?style=flat-square)
@@ -18,42 +20,39 @@
 
 ---
 
-## 它解决什么问题
+##  这是一个什么样的工具
 
-当下载目录里堆满以文件夹和视频为单位的资源时，普通压缩工具只能生成压缩包，却不会告诉你“里面是什么、放到了哪里、是否已经收过”。仓鼠症大结局把这几件事连成一条可核验的流程：
+如果你有以下困扰之一，那它就是为你做的：
+
+- 📁 下载文件夹里堆了几个 TB 的视频和图片，**找起来像考古**
+- 🔁 同一个资源**重复下载了 3 次才想起来**"好像已经存过了"
+- 🗂 想整理，但**一打开文件夹就放弃了**
+- 😰 备份到云盘，但**文件凌乱**，传上去就再也找不到
+- 🔒 不想把私人媒体交给**云相册的 AI 扫描**
+
+## 它做什么
+
+把下载目录里堆成山的文件夹和视频，逐个压缩、校验、登记到一个可搜索的本地仓库。普通压缩工具只生成压缩包；Hamster Archive 同时告诉你**里面是什么、放到了哪里、是否已经收过**。
 
 ```text
 扫描 → 清单与查重 → 7-Zip 压缩 → 完整性验证 → 建立仓库记录 → 后处理原文件
 ```
 
 - 主目录中的每个一级文件夹或视频，分别成为一个任务；也可直接拖入单项。
-- 生成目录清单、缩略图和媒体信息，随后用 SQLite 建立本地索引。
+- 生成目录清单、**自动截取各类媒体缩略图**和信息，随后用 SQLite 建立本地索引。
 - 大任务自动按 10 GiB 分卷；密码、备份位置、标签、星级和备注可随项目记录。
 - 疑似重复、大任务和体积异常会停下来等待人工确认。
 - 只有压缩、验证和入库完成后，才会按设置保留、移动或回收原文件。
 
-![归档工作台](docs/images/workbench.png)
+## 界面一览
 
-## 仓库不是一张压缩包清单
+![Hamster Archive 四个代表性界面：归档工作台、真实任务队列、仓库概览与大缩略图仓库](docs/images/interface-overview.png)
 
-仓库提供封面浏览、活跃度统计和随机漫步。搜索覆盖标题、标签、备注、路径与文件名；列表分页，目录树按可视区域渲染，适合逐渐增长的库存。
+> 截图由“构造测试目录”中的 9 个演示项目真实扫描、压缩校验并入库后生成；展示路径已替换为演示路径，不包含仓库密码、真实用户配置或个人存档。
 
-![仓库概览](docs/images/warehouse-overview.png)
+## 仓库
 
-<details>
-<summary>查看更多界面</summary>
-
-### 大缩略图浏览
-
-![大缩略图仓库](docs/images/warehouse-grid.png)
-
-### 项目整理与相似关系
-
-![项目详情](docs/images/warehouse-detail.png)
-
-</details>
-
-> 截图使用虚构项目和 Pixabay 演示图片，不包含真实用户数据。图片来源：[Mountain Lake](https://pixabay.com/photos/mountain-lake-landscape-nature-9024209/)、[City Night](https://pixabay.com/photos/city-night-street-destination-6818066/) 与 [Hamster](https://pixabay.com/photos/hamster-pet-animal-cute-1772742/)，依 [Pixabay Content License](https://pixabay.com/service/license-summary/) 使用。
+仓库不是一张压缩包清单。它提供封面浏览、活跃度统计和随机漫步。搜索覆盖标题、标签、备注、路径与文件名；列表分页，目录树按可视区域渲染，适合逐渐增长的库存。
 
 ## 主要能力
 
@@ -122,7 +121,7 @@ npm start
 ## 便携数据布局
 
 ```text
-HamsterArchive-v3.0.0-win-x64/
+HamsterArchive-v3.5.0-win-x64/
 ├─ HamsterArchive.exe
 ├─ tools/
 │  ├─ 7zip/
