@@ -73,6 +73,11 @@ const elements = {
   bulkBackupDialog: document.querySelector('#bulk-backup-dialog'),
   bulkBackupForm: document.querySelector('#bulk-backup-form'),
   bulkBackupInput: document.querySelector('#bulk-backup-input'),
+  deleteCatalogDialog: document.querySelector('#delete-catalog-dialog'),
+  deleteCatalogForm: document.querySelector('#delete-catalog-form'),
+  deleteCatalogSummary: document.querySelector('#delete-catalog-summary'),
+  restoreOriginalSources: document.querySelector('#restore-original-sources'),
+  restoreOriginalSourcesHelp: document.querySelector('#restore-original-sources-help'),
   catalogPagination: document.querySelector('#catalog-pagination'),
   catalogPageStatus: document.querySelector('#catalog-page-status'),
   catalogPagePrev: document.querySelector('#catalog-page-prev'),
@@ -128,6 +133,7 @@ let catalogStateSignature = '';
 let suppressSelectionClickUntil = 0;
 let toastTimer;
 let pendingManualImages = [];
+let similarityManageRecordId = null;
 const selectedJobIds = new Set();
 const selectedCatalogIds = new Set();
 
@@ -1126,19 +1132,56 @@ function isHttpUrl(value) {
   }
 }
 
+function sourceLocationPresentation(record) {
+  const originalPath = String(record.originalSourcePath || record.sourcePath || '').trim();
+  if (record.sourceDisposition === 'missing') {
+    return { text: '原文件已消失', value: '', isPath: false };
+  }
+  if (record.sourceDisposition === 'trashed') {
+    return { text: '源文件已进入回收站', value: '', isPath: false };
+  }
+  if (record.sourceDisposition === 'moved') {
+    const movedTo = String(record.movedTo || '').trim();
+    return { text: movedTo ? `已移动到：${movedTo}` : '源文件已移动', value: '', isPath: false };
+  }
+  if (originalPath) return { text: originalPath, value: originalPath, isPath: true };
+  return { text: '未记录', value: '', isPath: false };
+}
+
 function renderSimilarProjects(record) {
   const warning = make('section', 'similar-projects');
-  warning.append(make('h3', '', record.possibleDuplicate ? '可能重复 · 相似项目' : '相似项目'));
+  const head = make('div', 'similar-projects-head');
+  head.append(make('h3', '', record.possibleDuplicate ? '可能重复 · 相似项目' : '相似项目'));
+  const actions = make('div', 'similar-project-actions');
+  const recalculate = make('button', 'button ghost', '重新计算');
+  recalculate.type = 'button';
+  recalculate.dataset.recalculateSimilar = record.id;
+  const manage = make('button', 'button ghost', similarityManageRecordId === record.id ? '完成管理' : '管理');
+  manage.type = 'button';
+  manage.dataset.manageSimilar = record.id;
+  actions.append(recalculate, manage);
+  head.append(actions);
+  warning.append(head);
   if ((record.similarRecords || []).length === 0) {
     warning.append(make('p', 'muted', '当前没有已关联的相似项目。'));
   } else {
     const links = make('div', 'similar-project-links');
     for (const similar of record.similarRecords) {
+      const item = make('span', 'similar-project-item');
       const button = make('button', 'button ghost', `${similar.title} · ${Math.round((similar.score || 0) * 100)}%`);
       button.type = 'button';
       button.dataset.similarRecord = similar.id;
       button.title = (similar.reasons || []).join('；');
-      links.append(button);
+      item.append(button);
+      if (similarityManageRecordId === record.id) {
+        const remove = make('button', 'remove-similar-button', '×');
+        remove.type = 'button';
+        remove.dataset.removeSimilar = similar.id;
+        remove.dataset.recordId = record.id;
+        remove.setAttribute('aria-label', `移除与“${similar.title}”的相似关系`);
+        item.append(remove);
+      }
+      links.append(item);
     }
     warning.append(links);
   }
@@ -1156,16 +1199,17 @@ function renderCatalogDetail(record) {
   if (record.recordType === 'manual') {
     heading.append(make('p', '', '手动库存记录 · 未关联压缩包或文件清单'));
   }
-  if (record.sourcePath) {
+  const sourceLocation = sourceLocationPresentation(record);
+  {
     const sourceLine = make('p', 'source-location');
-    sourceLine.append(document.createTextNode('原始位置：'));
-    if (isHttpUrl(record.sourcePath)) {
-      const sourceLink = make('button', 'inline-link', record.sourcePath);
+    sourceLine.append(document.createTextNode('原文件位置：'));
+    if (sourceLocation.isPath && isHttpUrl(sourceLocation.value)) {
+      const sourceLink = make('button', 'inline-link', sourceLocation.text);
       sourceLink.type = 'button';
-      sourceLink.dataset.externalUrl = record.sourcePath;
+      sourceLink.dataset.externalUrl = sourceLocation.value;
       sourceLine.append(sourceLink);
     } else {
-      sourceLine.append(document.createTextNode(record.sourcePath));
+      sourceLine.append(document.createTextNode(sourceLocation.text));
     }
     heading.append(sourceLine);
   }
@@ -1181,26 +1225,6 @@ function renderCatalogDetail(record) {
       archiveLine.append(copy);
     }
     heading.append(archiveLine);
-    const passwordLine = make('p', 'archive-password-line');
-    passwordLine.append(document.createTextNode('解压密码：'));
-    const passwordKnown = record.hasPassword && typeof record.archivePassword === 'string' && record.archivePassword.length > 0;
-    const passwordValue = make(
-      'span',
-      'archive-password-value',
-      passwordKnown ? '****' : (record.hasPassword ? '已加密（密码未记录）' : '未设置')
-    );
-    passwordLine.append(passwordValue);
-    if (passwordKnown) {
-      const toggle = make('button', 'mini-copy-button', '显示');
-      toggle.type = 'button';
-      toggle.dataset.passwordToggle = record.archivePassword;
-      const copyPassword = make('button', 'mini-copy-button', '复制');
-      copyPassword.type = 'button';
-      copyPassword.dataset.copyText = record.archivePassword;
-      copyPassword.dataset.copyKind = 'password';
-      passwordLine.append(toggle, copyPassword);
-    }
-    heading.append(passwordLine);
   }
   const stats = make('div', 'archive-stats');
   if (record.recordType === 'manual') {
@@ -1210,12 +1234,7 @@ function renderCatalogDetail(record) {
       make('span', '', `${record.fileCount || 0} 个文件`),
       make('span', '', `${record.directories?.length || 0} 个子目录`),
       make('span', '', `原始 ${formatBytes(record.originalBytes)}`),
-      make('span', '', `压缩后 ${formatBytes(record.archiveTotalBytes)}`),
-      make('span', '', record.sourceDisposition === 'trashed'
-        ? '源项目已进回收站'
-        : record.sourceDisposition === 'moved'
-          ? `源项目已移动${record.movedTo ? `：${record.movedTo}` : ''}`
-          : record.sourceDisposition?.endsWith('_failed') ? '源项目处理失败，原位置保留' : '源项目已保留')
+      make('span', '', `压缩后 ${formatBytes(record.archiveTotalBytes)}`)
     );
   }
   if (record.backupLocation) stats.append(make('span', 'backup-stat', `备份位置：${record.backupLocation}`));
@@ -1883,11 +1902,52 @@ elements.catalogDetail.addEventListener('click', (event) => {
     });
     return;
   }
+  const removeSimilar = event.target.closest('button[data-remove-similar]');
+  if (removeSimilar) {
+    const recordId = removeSimilar.dataset.recordId;
+    const similarId = removeSimilar.dataset.removeSimilar;
+    void safely(() => window.archiveApp.removeCatalogSimilarity(recordId, similarId)).then(async (updated) => {
+      if (!updated) return;
+      renderCatalogDetail(updated);
+      const state = await safely(() => window.archiveApp.getState());
+      if (state) render(state);
+      await refreshCatalog();
+      showToast('已双向移除相似关系');
+    });
+    return;
+  }
+  const recalculateSimilar = event.target.closest('button[data-recalculate-similar]');
+  if (recalculateSimilar) {
+    recalculateSimilar.disabled = true;
+    void safely(() => window.archiveApp.recalculateCatalogSimilarity(recalculateSimilar.dataset.recalculateSimilar)).then(async (updated) => {
+      if (!updated) return;
+      renderCatalogDetail(updated);
+      const state = await safely(() => window.archiveApp.getState());
+      if (state) render(state);
+      await refreshCatalog();
+      showToast('相似关系已重新计算');
+    });
+    return;
+  }
+  const manageSimilar = event.target.closest('button[data-manage-similar]');
+  if (manageSimilar) {
+    similarityManageRecordId = similarityManageRecordId === manageSimilar.dataset.manageSimilar
+      ? null
+      : manageSimilar.dataset.manageSimilar;
+    void loadCatalogDetails(manageSimilar.dataset.manageSimilar);
+    return;
+  }
   const button = event.target.closest('button[data-similar-record]');
   if (!button) return;
   void loadCatalogDetails(button.dataset.similarRecord).then(() => {
     elements.catalogDetail.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
+});
+
+document.addEventListener('click', (event) => {
+  const external = event.target.closest('button[data-external-url]');
+  if (!external || elements.catalogDetail.contains(external)) return;
+  void safely(() => window.archiveApp.openExternal(external.dataset.externalUrl));
 });
 
 elements.selectAllCatalog.addEventListener('change', () => {
@@ -1957,7 +2017,12 @@ elements.undoCatalog.addEventListener('click', async () => {
   showToast('已撤回最近一次仓库操作');
 });
 
-elements.deleteCatalogSelected.addEventListener('click', async () => {
+function closeDeleteCatalogDialog() {
+  elements.deleteCatalogDialog.close();
+  elements.deleteCatalogForm.reset();
+}
+
+elements.deleteCatalogSelected.addEventListener('click', () => {
   const selectedRecords = (currentState?.catalog || []).filter((record) => selectedCatalogIds.has(record.id));
   if (selectedRecords.length === 0) return;
   const archiveCount = selectedRecords.filter((record) => record.recordType !== 'manual').length;
@@ -1965,10 +2030,28 @@ elements.deleteCatalogSelected.addEventListener('click', async () => {
   const parts = [];
   if (archiveCount > 0) parts.push(`${archiveCount} 个普通归档的压缩包将移入 Windows 回收站`);
   if (manualCount > 0) parts.push(`${manualCount} 条手动库存记录将被移除`);
-  if (!window.confirm(`确认删除所选 ${selectedRecords.length} 项？\n\n${parts.join('；')}。\n只有压缩包成功进入回收站后，对应仓库记录才会删除。`)) return;
+  elements.deleteCatalogSummary.textContent = `所选 ${selectedRecords.length} 项：${parts.join('；')}。只有必要操作全部成功后，对应仓库记录才会删除。`;
+  const restorableCount = selectedRecords.filter((record) => ['moved', 'trashed'].includes(record.sourceDisposition)).length;
+  elements.restoreOriginalSources.disabled = restorableCount === 0;
+  elements.restoreOriginalSources.closest('.restore-source-option').classList.toggle('disabled', restorableCount === 0);
+  elements.restoreOriginalSourcesHelp.textContent = restorableCount > 0
+    ? `其中 ${restorableCount} 项记录为已移动或已进入回收站；复原失败时会保留对应仓库记录和压缩包。`
+    : '所选项目没有可以尝试复原的原文件记录。';
+  elements.deleteCatalogDialog.showModal();
+});
 
-  const result = await safely(() => window.archiveApp.deleteCatalogRecords([...selectedCatalogIds]));
+document.querySelector('#close-delete-catalog').addEventListener('click', closeDeleteCatalogDialog);
+document.querySelector('#cancel-delete-catalog').addEventListener('click', closeDeleteCatalogDialog);
+elements.deleteCatalogDialog.addEventListener('click', (event) => {
+  if (event.target === elements.deleteCatalogDialog) closeDeleteCatalogDialog();
+});
+elements.deleteCatalogForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const result = await safely(() => window.archiveApp.deleteCatalogRecords([...selectedCatalogIds], {
+    restoreOriginalSources: elements.restoreOriginalSources.checked
+  }));
   if (!result) return;
+  closeDeleteCatalogDialog();
   for (const id of result.deletedIds) selectedCatalogIds.delete(id);
   if (activeCatalogId && result.deletedIds.includes(activeCatalogId)) {
     activeCatalogId = null;

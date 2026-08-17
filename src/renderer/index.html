@@ -20,9 +20,9 @@
     <div>
       <p class="eyebrow">LOCAL ARCHIVE DESK</p>
       <h1>仓鼠症大结局</h1>
-      <p class="subtitle">把混乱的收藏安全地打包、验证、入库，再交给云盘。</p>
+      <p class="subtitle">把混乱的文件，变成可视化仓库和规整压缩包，再交给云盘。</p>
     </div>
-    <div id="source-safety-chip" class="safety-chip"><span></span>完成后保留源文件</div>
+    <div id="source-safety-chip" class="safety-chip"><span></span>完成后保留原文件</div>
   </header>
 
   <nav class="top-nav" aria-label="页面导航">
@@ -51,7 +51,7 @@
             <div><input id="intake-directory" type="text"><button data-pick="intake-directory">选择</button></div>
           </label>
           <label class="path-field">
-            <span>打包后文件存放点</span>
+            <span>最终压缩包存放点</span>
             <div><input id="archive-output-directory" type="text"><button data-pick="archive-output-directory">选择</button></div>
           </label>
         </div>
@@ -87,25 +87,10 @@
         <label class="safety-option">
           <input id="auto-trash-completed" type="checkbox">
           <span>
-            <strong>归档完成后，把对应源文件夹或视频移入 Windows 回收站</strong>
+            <strong>归档完成后，把对应原文件夹或视频移入 Windows 回收站</strong>
             <small>仅在压缩、完整性验证、入库记录和缩略图全部完成后执行；可从回收站恢复</small>
           </span>
         </label>
-
-        <div class="intake-options">
-          <label class="option-card">
-            <input id="video-frame-backup" type="checkbox">
-            <span><strong>视频帧备份</strong><small>按总时长平均抽取画面，并在仓库中按视频成组显示</small></span>
-            <input id="video-frame-count" type="number" min="1" max="20" step="1" value="6" aria-label="每个视频保存的帧数">
-            <em>帧/视频</em>
-          </label>
-          <label class="option-card">
-            <input id="small-item-filter" type="checkbox">
-            <span><strong>小项目过滤</strong><small>扫描和拖入时跳过低于阈值的视频或文件夹</small></span>
-            <input id="minimum-task-mb" type="number" min="1" max="102400" step="1" value="100" aria-label="最小项目大小">
-            <em>MB</em>
-          </label>
-        </div>
 
         <details class="advanced">
           <summary>高级设置</summary>
@@ -135,6 +120,20 @@
             <input id="record-archive-password" type="checkbox">
             <span><strong>记录解压密码</strong><small>把任务实际使用的密码作为专属词条写入仓库；不勾选时只记录“已加密”。</small></span>
           </label>
+          <div class="intake-options advanced-intake-options">
+            <label class="option-card">
+              <input id="video-frame-backup" type="checkbox">
+              <span><strong>视频帧备份</strong><small>按总时长平均抽取画面，并在仓库中按视频成组显示</small></span>
+              <input id="video-frame-count" type="number" min="1" max="20" step="1" value="6" aria-label="每个视频保存的帧数">
+              <em>帧/视频</em>
+            </label>
+            <label class="option-card">
+              <input id="small-item-filter" type="checkbox">
+              <span><strong>小项目过滤</strong><small>扫描和拖入时跳过低于阈值的视频或文件夹</small></span>
+              <input id="minimum-task-mb" type="number" min="1" max="102400" step="1" value="100" aria-label="最小项目大小">
+              <em>MB</em>
+            </label>
+          </div>
           <label class="option-card schedule-card advanced-schedule-setting">
             <input id="schedule-enabled" type="checkbox">
             <span><strong>定时运行</strong><small>时间不足时不再启动下一项；到结束时间会安全暂停</small></span>
@@ -356,6 +355,15 @@
     </div>
   </main>
 
+  <footer class="app-footer">
+    <span>Hamster Archive · 本地优先的归档工具</span>
+    <span class="app-footer-links">
+      <button class="footer-link" type="button" data-external-url="https://github.com/CarlosZ16420/hamster-archive-desktop">GitHub 仓库</button>
+      <i aria-hidden="true">·</i>
+      <button class="footer-link" type="button" data-external-url="https://github.com/CarlosZ16420/hamster-archive-desktop/issues">欢迎反馈</button>
+    </span>
+  </footer>
+
   <dialog id="manual-catalog-dialog" class="manual-dialog">
     <form id="manual-catalog-form">
       <div class="dialog-heading">
@@ -434,11 +442,23 @@
     </form>
   </dialog>
 
+  <dialog id="delete-catalog-dialog" class="manual-dialog compact-dialog">
+    <form id="delete-catalog-form">
+      <div class="dialog-heading"><div><p class="step">删除仓库项目</p><h2>确认删除所选内容</h2></div><button id="close-delete-catalog" class="dialog-close" type="button" aria-label="关闭">×</button></div>
+      <p id="delete-catalog-summary" class="dialog-help"></p>
+      <label class="restore-source-option">
+        <input id="restore-original-sources" type="checkbox">
+        <span><strong>尝试将原文件位置复原</strong><small id="restore-original-sources-help">仅处理仍在回收站或归档后移动位置中的原文件；复原失败时会保留对应仓库记录和压缩包。</small></span>
+      </label>
+      <div class="dialog-actions"><button id="cancel-delete-catalog" class="button ghost" type="button">取消</button><button class="button danger" type="submit">确认删除</button></div>
+    </form>
+  </dialog>
+
   <dialog id="usage-guide-dialog" class="manual-dialog usage-guide-dialog">
     <div class="dialog-heading"><div><p class="step">使用说明 / QUICK START</p><h2>把资源变成可检索的安全归档</h2></div><button id="close-usage-guide" class="dialog-close" type="button" aria-label="关闭">×</button></div>
     <div class="usage-guide-copy">
       <section><b>01</b><div><strong>选择资源主目录</strong><p>应用会把其中每个大文件夹与视频分别压缩，生成规整的压缩包，并把内容记录到仓库。</p></div></section>
-      <section><b>02</b><div><strong>确认任务并完成备份</strong><p>任务会先进入列表；手动确认以前，应用不会改动源文件。完成后可使用云盘自动同步存放点，或自行上传压缩包。</p></div></section>
+      <section><b>02</b><div><strong>手动云备份压缩包</strong><p>本工具只负责本地记录，您可以将压缩包存放点设置为云盘自动同步的目录，或自行上传压缩包。</p></div></section>
       <section><b>03</b><div><strong>按需处理单个资源</strong><p>也可以把单个文件夹或视频直接拖入应用，单独加入任务列表。</p></div></section>
       <p class="usage-guide-note">本应用会跳过主目录中的零散图片和其他文件。如需处理，请先把它们收纳到文件夹中。</p>
     </div>

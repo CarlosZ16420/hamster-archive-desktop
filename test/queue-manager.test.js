@@ -270,6 +270,62 @@ test('similar project links are stored symmetrically', () => {
   assert.equal(manager.catalog[0].possibleDuplicate, true);
 });
 
+test('similar project links can be recalculated and dismissed symmetrically', async () => {
+  const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' });
+  manager.catalog = [
+    { id: 'a', title: '王佳乐在北京上学', displayName: '项目A', tags: [], manifest: [], directories: [], dismissedSimilarRecordIds: [] },
+    { id: 'b', title: '北京王佳乐的学习生活', displayName: '项目B', tags: [], manifest: [], directories: [], dismissedSimilarRecordIds: [] }
+  ];
+  manager.rebuildAllSimilarityRelations();
+  await manager.recalculateCatalogSimilarity('a');
+  assert.equal(manager.catalog[1].similarRecords.some((item) => item.id === 'a'), true);
+
+  await manager.removeCatalogSimilarity('a', 'b');
+  assert.deepEqual(manager.catalog[0].similarRecords, []);
+  assert.deepEqual(manager.catalog[1].similarRecords, []);
+  assert.deepEqual(manager.catalog[0].dismissedSimilarRecordIds, ['b']);
+  assert.deepEqual(manager.catalog[1].dismissedSimilarRecordIds, ['a']);
+
+  manager.rebuildAllSimilarityRelations();
+  assert.deepEqual(manager.catalog[0].similarRecords, []);
+  assert.deepEqual(manager.catalog[1].similarRecords, []);
+});
+
+test('legacy catalog records receive an empty hidden original source location', async () => {
+  class LegacyStore extends FakeStore {
+    async loadCatalog() {
+      return [{ id: 'legacy', title: '旧记录', displayName: '旧记录', sourcePath: 'E:\\old\\item', tags: [], manifest: [], directories: [] }];
+    }
+    async saveCatalog(_directory, records) { this.catalog = structuredClone(records); }
+  }
+  const store = new LegacyStore();
+  const manager = new QueueManager(store, { libraryDir: 'E:\\library' });
+  await manager.initialize();
+  assert.equal(Object.hasOwn(manager.catalog[0], 'originalSourcePath'), true);
+  assert.equal(manager.catalog[0].originalSourcePath, '');
+  assert.equal(store.catalog[0].originalSourcePath, '');
+});
+
+test('lightweight source audit marks missing moved and recycled originals once', async () => {
+  const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' }, {
+    pathExists: async () => false,
+    isTrashItemPresent: async () => false
+  });
+  manager.catalog = [
+    { id: 'moved', title: '已移动', sourceDisposition: 'moved', movedTo: 'E:\\done\\moved', originalSourcePath: 'E:\\source\\moved' },
+    { id: 'trash', title: '回收站', sourceDisposition: 'trashed', originalSourcePath: 'E:\\source\\trash' },
+    { id: 'missing', title: '已消失', sourceDisposition: 'missing', originalSourcePath: '' }
+  ];
+  const result = await manager.auditTrackedSourceLocations({ limit: 10 });
+  assert.deepEqual(result, { checked: 2, missing: 2 });
+  assert.equal(manager.catalog[0].sourceDisposition, 'missing');
+  assert.equal(manager.catalog[1].sourceDisposition, 'missing');
+  assert.equal(manager.catalog[0].originalSourcePath, '');
+  assert.equal(manager.catalog[1].originalSourcePath, '');
+  const second = await manager.auditTrackedSourceLocations({ limit: 10 });
+  assert.deepEqual(second, { checked: 0, missing: 0 });
+});
+
 test('completed source movement refuses collisions and preserves the source', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-source-move-'));
   try {
@@ -653,6 +709,57 @@ test('catalog deletion quarantines archive volumes atomically and rejects paths 
   assert.equal(trashed.length, 2);
   assert.ok(trashed.some((targetPath) => targetPath.includes('delete-quarantine')));
   assert.ok(trashed.some((targetPath) => targetPath.endsWith('thumbnails\\job-safe')));
+});
+
+test('catalog deletion can restore a moved original before removing the archive record', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-restore-source-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const originalPath = path.join(root, 'source', 'item');
+  const movedPath = path.join(root, 'processed', 'item');
+  const archiveDirectory = path.join(root, 'archives');
+  const repositoryDirectory = path.join(root, 'repository');
+  const stagingDirectory = path.join(root, 'staging');
+  await fs.mkdir(movedPath, { recursive: true });
+  await fs.mkdir(archiveDirectory, { recursive: true });
+  await fs.writeFile(path.join(movedPath, 'one.bin'), 'abc');
+  await fs.writeFile(path.join(archiveDirectory, 'item.7z'), 'archive');
+  const manager = new QueueManager(new FakeStore(), {
+    archiveOutputDirectory: archiveDirectory, repositoryDirectory, archiveStagingDirectory: stagingDirectory
+  }, { trashItem: async () => {} });
+  manager.catalog = [{
+    id: 'restore', jobId: null, title: '复原项目', recordType: 'archive', sourceType: 'directory',
+    originalSourcePath: originalPath, sourceDisposition: 'moved', movedTo: movedPath,
+    fileCount: 1, originalBytes: 3, archiveDirectory, archiveFiles: [{ name: 'item.7z' }]
+  }];
+
+  const result = await manager.deleteCatalogRecords(['restore'], { restoreOriginalSources: true });
+  assert.deepEqual(result.deletedIds, ['restore']);
+  assert.equal((await fs.stat(originalPath)).isDirectory(), true);
+  await assert.rejects(fs.access(movedPath), /ENOENT/);
+});
+
+test('failed original restoration keeps both archive and warehouse record', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-restore-failure-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const archiveDirectory = path.join(root, 'archives');
+  await fs.mkdir(archiveDirectory, { recursive: true });
+  await fs.writeFile(path.join(archiveDirectory, 'item.7z'), 'archive');
+  const manager = new QueueManager(new FakeStore(), {
+    archiveOutputDirectory: archiveDirectory,
+    repositoryDirectory: path.join(root, 'repository'),
+    archiveStagingDirectory: path.join(root, 'staging')
+  }, { trashItem: async () => {} });
+  manager.catalog = [{
+    id: 'restore-failure', jobId: null, title: '复原失败', recordType: 'archive', sourceType: 'directory',
+    originalSourcePath: path.join(root, 'source', 'item'), sourceDisposition: 'moved', movedTo: path.join(root, 'missing', 'item'),
+    fileCount: 1, originalBytes: 3, archiveDirectory, archiveFiles: [{ name: 'item.7z' }]
+  }];
+
+  const result = await manager.deleteCatalogRecords(['restore-failure'], { restoreOriginalSources: true });
+  assert.equal(result.deletedIds.length, 0);
+  assert.match(result.failures[0].message, /已找不到原文件/);
+  await fs.access(path.join(archiveDirectory, 'item.7z'));
+  assert.equal(manager.catalog.length, 1);
 });
 
 test('new flat multi-volume records are moved to one quarantine before deletion', async (t) => {

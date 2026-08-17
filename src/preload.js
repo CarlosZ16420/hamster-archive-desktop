@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('archiveApp', {
   getRandomCatalogRecord: (excludeId) => ipcRenderer.invoke('catalog:random', excludeId),
   getCatalogDetails: (recordId) => ipcRenderer.invoke('catalog:details', recordId),
   updateCatalogMetadata: (recordId, metadata) => ipcRenderer.invoke('catalog:update-metadata', recordId, metadata),
+  recalculateCatalogSimilarity: (recordId) => ipcRenderer.invoke('catalog:recalculate-similarity', recordId),
+  removeCatalogSimilarity: (recordId, similarId) => ipcRenderer.invoke('catalog:remove-similarity', recordId, similarId),
   setCatalogCover: (recordId, relativePath) => ipcRenderer.invoke('catalog:set-cover', recordId, relativePath),
   deleteCatalogImage: (recordId, thumbnailRef) => ipcRenderer.invoke('catalog:delete-thumbnail', recordId, thumbnailRef),
   addManualCatalogRecord: (input) => ipcRenderer.invoke('catalog:add-manual', input),
@@ -48,7 +50,7 @@ contextBridge.exposeInMainWorld('archiveApp', {
   addTagsToCatalogRecords: (recordIds, tags) => ipcRenderer.invoke('catalog:add-tags', recordIds, tags),
   updateBackupLocationForCatalogRecords: (recordIds, location) => ipcRenderer.invoke('catalog:update-backup-location', recordIds, location),
   undoCatalogAction: () => ipcRenderer.invoke('catalog:undo'),
-  deleteCatalogRecords: (recordIds) => ipcRenderer.invoke('catalog:delete', recordIds),
+  deleteCatalogRecords: (recordIds, options) => ipcRenderer.invoke('catalog:delete', recordIds, options),
   getThumbnail: (recordId, relativePath) => ipcRenderer.invoke('catalog:thumbnail', recordId, relativePath),
   onStateChanged: (callback) => {
     ipcRenderer.on('state:changed', (_event, state) => callback(state));

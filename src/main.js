@@ -19,6 +19,7 @@ const { makeUserDataLayout } = require('./core/storage-paths');
 const { IMAGE_EXTENSIONS, isVideoFile } = require('./core/constants');
 const { extractVideoFrames } = require('./core/media-service');
 const { checkForUpdates } = require('./core/update-checker');
+const { findTrashItems, isTrashItemPresent, restoreTrashItem } = require('./core/recycle-bin');
 
 let mainWindow;
 let queueManager;
@@ -26,6 +27,8 @@ let appStore;
 let allowWindowClose = false;
 let closePromptOpen = false;
 let scheduleTimer = null;
+let sourceAuditTimer = null;
+let sourceAuditStartupTimer = null;
 let lastCatalogPushSignature = '';
 const isSmokeTest = process.env.HAMSTER_SMOKE_TEST === '1';
 const applicationRoot = isSmokeTest && process.env.HAMSTER_SMOKE_USER_DATA_DIR
@@ -45,7 +48,8 @@ const hasSingleInstanceLock = isSmokeTest || app.requestSingleInstanceLock();
 function catalogPushSignature(catalog) {
   return JSON.stringify((catalog || []).map((record) => [
     record.id, record.metadataUpdatedAt, record.completedAt, record.coverThumbnailPath,
-    record.backupLocation, record.rating, record.tags, record.possibleDuplicate
+    record.backupLocation, record.rating, record.tags, record.possibleDuplicate, record.similarCount,
+    record.sourceDisposition, record.movedTo
   ]));
 }
 
@@ -227,7 +231,7 @@ function createWindow() {
           'discardAnomaly', 'pauseQueue', 'resumeQueue', 'removeJobs', 'clearCompletedJobs', 'clearQueue', 'clearPotentialDuplicates', 'confirmAllDuplicates', 'finishNextAndPause', 'searchCatalog',
           'getCatalogSuggestions', 'openSimilarityIgnoreTerms', 'reloadSimilarityIgnoreTerms',
           'getWarehouseInsights', 'getRandomCatalogRecord',
-          'getCatalogDetails', 'updateCatalogMetadata', 'addManualCatalogRecord', 'addCatalogImage',
+          'getCatalogDetails', 'updateCatalogMetadata', 'recalculateCatalogSimilarity', 'removeCatalogSimilarity', 'addManualCatalogRecord', 'addCatalogImage',
           'setCatalogCover', 'addTagsToCatalogRecords', 'updateBackupLocationForCatalogRecords', 'undoCatalogAction', 'deleteCatalogRecords', 'getThumbnail',
           'onStateChanged', 'onTaskProgress', 'onCatalogChanged', 'onScanProgress'
         ];
@@ -321,6 +325,13 @@ function createWindow() {
           await fs.mkdir(path.dirname(process.env.HAMSTER_SMOKE_OVERVIEW_SCREENSHOT), { recursive: true });
           await fs.writeFile(process.env.HAMSTER_SMOKE_OVERVIEW_SCREENSHOT, overviewImage.toPNG());
         }
+        if (process.env.HAMSTER_SMOKE_GRID_SCREENSHOT) {
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('#library-layout')?.scrollIntoView({ block: 'start' })`);
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          const gridImage = await mainWindow.webContents.capturePage();
+          await fs.mkdir(path.dirname(process.env.HAMSTER_SMOKE_GRID_SCREENSHOT), { recursive: true });
+          await fs.writeFile(process.env.HAMSTER_SMOKE_GRID_SCREENSHOT, gridImage.toPNG());
+        }
         await mainWindow.webContents.executeJavaScript(`document.querySelector('.catalog-cover img')?.click()`);
         await new Promise((resolve) => setTimeout(resolve, 300));
         const cardLightboxStatus = await mainWindow.webContents.executeJavaScript(`({
@@ -329,11 +340,7 @@ function createWindow() {
           hasCoverButton: Boolean(document.querySelector('#set-thumbnail-cover'))
         })`);
         await mainWindow.webContents.executeJavaScript(`document.querySelector('#close-thumbnail-lightbox')?.click()`);
-        if (process.env.HAMSTER_SMOKE_GRID_SCREENSHOT) {
-          const gridImage = await mainWindow.webContents.capturePage();
-          await fs.mkdir(path.dirname(process.env.HAMSTER_SMOKE_GRID_SCREENSHOT), { recursive: true });
-          await fs.writeFile(process.env.HAMSTER_SMOKE_GRID_SCREENSHOT, gridImage.toPNG());
-        }
+        await new Promise((resolve) => setTimeout(resolve, 180));
         await mainWindow.webContents.executeJavaScript(`document.querySelector('.catalog-open')?.click()`);
         await new Promise((resolve) => setTimeout(resolve, 1200));
         await mainWindow.webContents.executeJavaScript(`document.querySelectorAll('.thumbnail-gallery img')[1]?.click()`);
@@ -706,6 +713,16 @@ function registerIpc() {
     return queueManager.updateCatalogMetadata(recordId, metadata);
   });
 
+  ipcMain.handle('catalog:recalculate-similarity', async (event, recordId) => {
+    assertTrustedSender(event);
+    return queueManager.recalculateCatalogSimilarity(recordId);
+  });
+
+  ipcMain.handle('catalog:remove-similarity', async (event, recordId, similarId) => {
+    assertTrustedSender(event);
+    return queueManager.removeCatalogSimilarity(recordId, similarId);
+  });
+
   ipcMain.handle('catalog:set-cover', async (event, recordId, relativePath) => {
     assertTrustedSender(event);
     return queueManager.setCatalogCover(recordId, relativePath);
@@ -742,9 +759,9 @@ function registerIpc() {
     return queueManager.undoCatalogAction();
   });
 
-  ipcMain.handle('catalog:delete', async (event, recordIds) => {
+  ipcMain.handle('catalog:delete', async (event, recordIds, options) => {
     assertTrustedSender(event);
-    return queueManager.deleteCatalogRecords(recordIds);
+    return queueManager.deleteCatalogRecords(recordIds, options);
   });
 
   ipcMain.handle('catalog:thumbnail', async (event, recordId, relativePath) => {
@@ -790,6 +807,9 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     createThumbnails,
     storeCatalogImage,
     trashItem: (targetPath) => shell.trashItem(targetPath),
+    findTrashItems,
+    isTrashItemPresent,
+    restoreTrashItem,
     resolveProgramPath: (configuredPath) => resolveApplicationPath(workspaceRoot, configuredPath)
   });
   await queueManager.initialize();
@@ -797,6 +817,16 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     void queueManager.handleScheduleTick().catch((error) => console.error('SCHEDULE_ERROR', error));
   }, 15_000);
   scheduleTimer.unref?.();
+  sourceAuditStartupTimer = setTimeout(() => {
+    void queueManager.auditTrackedSourceLocations({ limit: 20 })
+      .catch((error) => console.error('SOURCE_AUDIT_ERROR', error));
+  }, 20_000);
+  sourceAuditStartupTimer.unref?.();
+  sourceAuditTimer = setInterval(() => {
+    void queueManager.auditTrackedSourceLocations({ limit: 30 })
+      .catch((error) => console.error('SOURCE_AUDIT_ERROR', error));
+  }, 30 * 60_000);
+  sourceAuditTimer.unref?.();
   if (process.env.HAMSTER_TRASH_TEST_DIR) {
     const trashTestDir = path.resolve(process.env.HAMSTER_TRASH_TEST_DIR);
     if (!path.basename(trashTestDir).startsWith('hamster-trash-smoke-')) {
@@ -811,29 +841,43 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
+    if (process.env.HAMSTER_RESTORE_TEST === '1') {
+      if (!(await isTrashItemPresent(trashTestDir))) throw new Error('回收站复原测试失败：没有找到刚移入回收站的目录。');
+      const batchTrashMatches = await findTrashItems([trashTestDir]);
+      if (!batchTrashMatches.some((item) => path.resolve(item).toLowerCase() === trashTestDir.toLowerCase())) {
+        throw new Error('回收站批量核验测试失败：没有找到刚移入回收站的目录。');
+      }
+      if (!(await restoreTrashItem(trashTestDir))) throw new Error('回收站复原测试失败：系统未执行复原。');
+      await fs.access(path.join(trashTestDir, 'temporary-test-file.txt'));
+      await fs.rm(trashTestDir, { recursive: true, force: true });
+      console.log('HAMSTER_RESTORE_TEST_OK');
+    }
     console.log('HAMSTER_TRASH_TEST_OK');
   }
   if (process.env.HAMSTER_SMOKE_FIXTURE_IMAGE) {
-    const fixtureImage = process.env.HAMSTER_SMOKE_FIXTURE_IMAGE;
-    const imageStats = await fs.stat(fixtureImage);
+    const fixtureImages = String(process.env.HAMSTER_SMOKE_FIXTURE_IMAGES || process.env.HAMSTER_SMOKE_FIXTURE_IMAGE)
+      .split(path.delimiter)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const fixtureImage = fixtureImages[0];
     const fixtureJob = {
       id: 'smoke-fixture',
       sourcePath: path.dirname(fixtureImage),
       sourceType: 'directory'
     };
-    const fixtureManifest = await createThumbnails(fixtureJob, [{
-      relativePath: path.basename(fixtureImage),
-      name: path.basename(fixtureImage),
-      extension: path.extname(fixtureImage).toLowerCase(),
-      size: imageStats.size,
-      md5: 'fixture-image-md5'
-    }], config);
-    fixtureManifest.push({
-      ...fixtureManifest[0],
-      relativePath: '相册/第二张候选封面.png',
-      name: '第二张候选封面.png',
-      md5: 'fixture-second-cover-md5'
-    });
+    const fixtureEntries = [];
+    for (let index = 0; index < fixtureImages.length; index += 1) {
+      const currentPath = fixtureImages[index];
+      const imageStats = await fs.stat(currentPath);
+      fixtureEntries.push({
+        relativePath: path.basename(currentPath),
+        name: path.basename(currentPath),
+        extension: path.extname(currentPath).toLowerCase(),
+        size: imageStats.size,
+        md5: `fixture-image-md5-${index}`
+      });
+    }
+    const fixtureManifest = await createThumbnails(fixtureJob, fixtureEntries, config);
     fixtureManifest.push({
       relativePath: '相册/子目录/示例视频.mp4',
       name: '示例视频.mp4',
@@ -895,11 +939,18 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
         archiveDirectory: config.archiveOutputDirectory,
         archiveBaseName: `arc_smoke_extra_${index}.7z`,
         archiveFiles: [{ name: `arc_smoke_extra_${index}.7z`, size: 1_000_000 }],
-        manifest: [],
+        manifest: fixtureManifest.map((file) => ({ ...file })),
         completedAt: new Date(Date.now() - (index * 86_400_000)).toISOString(),
         inventoryDate: new Date(Date.now() - (index * 86_400_000)).toISOString()
       });
     }
+  }
+  if (process.env.HAMSTER_README_DEMO === '1') {
+    Object.assign(queueManager.config, {
+      archiveOutputDirectory: 'D:\\HamsterArchive\\packed',
+      archiveStagingDirectory: 'D:\\HamsterArchive\\packed-staging',
+      processedSourceDirectory: 'D:\\HamsterArchive\\userdata\\processed'
+    });
   }
   registerIpc();
   createWindow();
@@ -939,5 +990,8 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  if (scheduleTimer) clearInterval(scheduleTimer);
+  if (sourceAuditTimer) clearInterval(sourceAuditTimer);
+  if (sourceAuditStartupTimer) clearTimeout(sourceAuditStartupTimer);
   appStore?.closeAll();
 });
