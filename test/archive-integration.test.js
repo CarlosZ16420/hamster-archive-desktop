@@ -1,0 +1,59 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fsSync = require('node:fs');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const test = require('node:test');
+const { runArchiveJob } = require('../src/core/archive-engine');
+
+const sevenZipPath = path.resolve(__dirname, '..', 'tools', '7zip', '7z.exe');
+
+test('real 7-Zip flow encrypts, verifies and moves a small test archive', {
+  skip: process.platform !== 'win32' || !fsSync.existsSync(sevenZipPath)
+}, async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-archive-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const sourcePath = path.join(root, 'source', '测试目录');
+  const archiveStagingDirectory = path.join(root, 'staging');
+  const archiveOutputDirectory = path.join(root, 'library');
+  await fs.mkdir(sourcePath, { recursive: true });
+  await fs.mkdir(path.join(sourcePath, '空子目录'), { recursive: true });
+  await fs.writeFile(path.join(sourcePath, '不会明文显示的文件名.txt'), 'hamster archive integration test', 'utf8');
+  const sourceStats = await fs.stat(path.join(sourcePath, '不会明文显示的文件名.txt'));
+
+  const result = await runArchiveJob({
+    id: 'integration-job',
+    sourcePath,
+    sourceType: 'directory',
+    fileCount: 1,
+    totalBytes: sourceStats.size,
+    archiveBaseName: 'arc_20260814T151230Z_a1b2c3d4.7z'
+  }, {
+    archiveStagingDirectory,
+    archiveOutputDirectory,
+    repositoryDirectory: path.join(root, 'saves'),
+    sevenZipPath,
+    archivePassword: 'integration-secret'
+  });
+
+  assert.equal(result.archiveFiles.length, 1);
+  assert.equal(result.manifest.length, 1);
+  assert.deepEqual(result.directories, ['空子目录']);
+  assert.match(result.manifest[0].md5, /^[a-f0-9]{32}$/);
+  const archivePath = path.join(
+    archiveOutputDirectory,
+    result.archiveFiles[0].name
+  );
+  assert.equal(fsSync.existsSync(archivePath), true);
+  assert.equal(fsSync.existsSync(path.join(archiveStagingDirectory, 'integration-job')), false);
+
+  const wrongPasswordListing = spawnSync(sevenZipPath, [
+    'l', archivePath, '-pwrong-password', '-y'
+  ], { encoding: 'utf8', windowsHide: true });
+  assert.notEqual(wrongPasswordListing.status, 0);
+  assert.equal(`${wrongPasswordListing.stdout}${wrongPasswordListing.stderr}`.includes('不会明文显示的文件名.txt'), false);
+});
