@@ -22,3 +22,26 @@ test('manual update check reports a newer GitHub release', async () => {
   assert.equal(result.updateAvailable, true);
   assert.equal(result.latestVersion, '2.0.0');
 });
+
+test('update metadata exposes a matching Windows asset for installation', async () => {
+  const result = await checkForUpdates({
+    currentVersion: '4.0.0',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        tag_name: 'v4.0.1',
+        html_url: 'https://example.test/release',
+        assets: [{
+          name: 'HamsterArchive-v4.0.1-win-x64.zip',
+          browser_download_url: 'https://github.com/CarlosZ16420/hamster-archiver/releases/download/v4.0.1/HamsterArchive-v4.0.1-win-x64.zip',
+          size: 123,
+          digest: 'sha256:' + 'a'.repeat(64)
+        }]
+      })
+    })
+  });
+  assert.equal(result.installable, true);
+  assert.equal(result.asset.name, 'HamsterArchive-v4.0.1-win-x64.zip');
+  assert.equal(result.asset.size, 123);
+});

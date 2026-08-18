@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 私密安全问题
+    url: https://github.com/CarlosZ16420/hamster-archiver/security/advisories/new
+    about: 密码、数据泄露或安全漏洞请通过私密安全报告提交，不要公开发 Issue。

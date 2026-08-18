@@ -1,0 +1,40 @@
+name: Bug 报告
+description: 报告可复现的功能异常；请勿上传私人媒体、密码或完整日志。
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: 感谢反馈。提交前请先脱敏路径、文件名、截图和日志。
+  - type: input
+    id: version
+    attributes:
+      label: 应用版本
+      placeholder: 例如 4.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题区域
+      options:
+        - 扫描与任务队列
+        - 压缩、校验或分卷
+        - 仓库、搜索或缩略图
+        - 原文件移动、回收或复原
+        - 更新、启动或界面
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请说明执行了什么、实际发生了什么、预期应该怎样。
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: 可提供经过脱敏的错误提示、日志片段或截图。不要提交密码、私人媒体和真实完整路径。

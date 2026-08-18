@@ -23,7 +23,10 @@
       <h1>仓鼠症大结局</h1>
       <p class="subtitle">把混乱的文件，变成可视化仓库和规整压缩包，再交给云盘。</p>
     </div>
-    <div id="source-safety-chip" class="safety-chip"><span></span>完成后保留原文件</div>
+    <div class="hero-actions">
+      <div id="source-safety-chip" class="safety-chip"><span></span>完成后保留原文件</div>
+      <label class="theme-picker" for="theme-mode"><span>主题</span><select id="theme-mode" aria-label="选择界面主题"><option value="day">白昼</option><option value="night">黑夜</option></select></label>
+    </div>
   </header>
 
   <nav class="top-nav" aria-label="页面导航">
@@ -152,26 +155,28 @@
             <input id="thumbnail-limit" type="number" min="1" max="500" step="1" value="30" aria-label="单个项目缩略图上限">
             <em>张</em>
           </label>
-          <label class="compact-number-setting compression-setting">
-            <span><strong>压缩格式</strong><small>7z 压缩能力更强；ZIP 兼容性更广。</small></span>
-            <select id="archive-format" aria-label="压缩格式">
-              <option value="7z">7z（默认）</option>
-              <option value="zip">ZIP</option>
-            </select>
-            <em>格式</em>
-          </label>
-          <label class="compact-number-setting compression-setting">
-            <span><strong>压缩率</strong><small>等级越高越慢；1 保持当前的快速默认值。</small></span>
-            <select id="compression-level" aria-label="压缩率">
-              <option value="0">0 · 不压缩</option>
-              <option value="1" selected>1 · 快速（默认）</option>
-              <option value="3">3 · 标准</option>
-              <option value="5">5 · 较高</option>
-              <option value="7">7 · 高</option>
-              <option value="9">9 · 极限</option>
-            </select>
-            <em>等级</em>
-          </label>
+          <div class="compression-options-row">
+            <label class="compact-number-setting compression-setting">
+              <span><strong>压缩格式</strong><small>7z 压缩能力更强；ZIP 兼容性更广。</small></span>
+              <select id="archive-format" aria-label="压缩格式">
+                <option value="7z">7z（默认）</option>
+                <option value="zip">ZIP</option>
+              </select>
+              <em>格式</em>
+            </label>
+            <label class="compact-number-setting compression-setting">
+              <span><strong>压缩率</strong><small>等级越高越慢；1 保持当前的快速默认值。</small></span>
+              <select id="compression-level" aria-label="压缩率">
+                <option value="0">0 · 不压缩</option>
+                <option value="1" selected>1 · 快速（默认）</option>
+                <option value="3">3 · 标准</option>
+                <option value="5">5 · 较高</option>
+                <option value="7">7 · 高</option>
+                <option value="9">9 · 极限</option>
+              </select>
+              <em>等级</em>
+            </label>
+          </div>
           <fieldset class="naming-options">
             <legend>压缩包命名方式</legend>
             <label><input type="radio" name="archive-naming-mode" value="timestamp_random" checked> 时间戳 + 随机数（默认）</label>
@@ -374,9 +379,9 @@
   <footer class="app-footer">
     <span>Hamster Archive · 本地优先的归档工具</span>
     <span class="app-footer-links">
-      <button class="footer-link" type="button" data-external-url="https://github.com/CarlosZ16420/hamster-archive-desktop">GitHub 仓库</button>
+      <button class="footer-link" type="button" data-external-url="https://github.com/CarlosZ16420/hamster-archiver">GitHub 仓库</button>
       <i aria-hidden="true">·</i>
-      <button class="footer-link" type="button" data-external-url="https://github.com/CarlosZ16420/hamster-archive-desktop/issues">欢迎反馈</button>
+      <button class="footer-link" type="button" data-external-url="https://github.com/CarlosZ16420/hamster-archiver/issues">欢迎反馈</button>
     </span>
   </footer>
 

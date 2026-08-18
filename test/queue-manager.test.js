@@ -374,7 +374,7 @@ test('legacy catalog records receive an empty hidden original source location', 
   assert.equal(store.catalog[0].originalSourcePath, '');
 });
 
-test('lightweight source audit marks missing moved and recycled originals once', async () => {
+test('source audit marks missing moved, recycled and pathless originals once', async () => {
   const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' }, {
     pathExists: async () => false,
     isTrashItemPresent: async () => false
@@ -382,16 +382,37 @@ test('lightweight source audit marks missing moved and recycled originals once',
   manager.catalog = [
     { id: 'moved', title: '已移动', sourceDisposition: 'moved', movedTo: 'E:\\done\\moved', originalSourcePath: 'E:\\source\\moved' },
     { id: 'trash', title: '回收站', sourceDisposition: 'trashed', originalSourcePath: 'E:\\source\\trash' },
+    { id: 'legacy-trash', title: '旧回收站记录', sourceDisposition: 'trashed', originalSourcePath: '' },
     { id: 'missing', title: '已消失', sourceDisposition: 'missing', originalSourcePath: '' }
   ];
   const result = await manager.auditTrackedSourceLocations({ limit: 10 });
-  assert.deepEqual(result, { checked: 2, missing: 2 });
+  assert.deepEqual(result, { checked: 3, missing: 3 });
   assert.equal(manager.catalog[0].sourceDisposition, 'missing');
   assert.equal(manager.catalog[1].sourceDisposition, 'missing');
+  assert.equal(manager.catalog[2].sourceDisposition, 'missing');
   assert.equal(manager.catalog[0].originalSourcePath, '');
   assert.equal(manager.catalog[1].originalSourcePath, '');
   const second = await manager.auditTrackedSourceLocations({ limit: 10 });
   assert.deepEqual(second, { checked: 0, missing: 0 });
+});
+
+test('startup-style source audit checks the complete catalog in bounded recycle-bin batches', async () => {
+  const batchSizes = [];
+  const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' }, {
+    findTrashItems: async (paths) => {
+      batchSizes.push(paths.length);
+      return paths;
+    }
+  });
+  manager.catalog = Array.from({ length: 205 }, (_, index) => ({
+    id: `trash-${index}`,
+    title: `回收站 ${index}`,
+    sourceDisposition: 'trashed',
+    originalSourcePath: `E:\\source\\trash-${index}`
+  }));
+  const result = await manager.auditTrackedSourceLocations();
+  assert.deepEqual(result, { checked: 205, missing: 0 });
+  assert.deepEqual(batchSizes, [100, 100, 5]);
 });
 
 test('completed source movement refuses collisions and preserves the source', async () => {
@@ -803,6 +824,30 @@ test('catalog deletion can restore a moved original before removing the archive 
   const result = await manager.deleteCatalogRecords(['restore'], { restoreOriginalSources: true });
   assert.deepEqual(result.deletedIds, ['restore']);
   assert.equal((await fs.stat(originalPath)).isDirectory(), true);
+  await assert.rejects(fs.access(movedPath), /ENOENT/);
+});
+
+test('catalog source restore keeps the warehouse record and updates its current location', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-open-restore-source-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const originalPath = path.join(root, 'source', 'item');
+  const movedPath = path.join(root, 'processed', 'item');
+  await fs.mkdir(movedPath, { recursive: true });
+  await fs.writeFile(path.join(movedPath, 'one.bin'), 'abc');
+  const store = new FakeStore();
+  const manager = new QueueManager(store, { repositoryDirectory: path.join(root, 'repository') });
+  manager.catalog = [{
+    id: 'restore-and-open', jobId: null, title: '复原后打开', recordType: 'archive', sourceType: 'directory',
+    originalSourcePath: originalPath, sourceDisposition: 'moved', movedTo: movedPath,
+    fileCount: 1, originalBytes: 3, archiveFiles: []
+  }];
+
+  const result = await manager.restoreCatalogSource('restore-and-open');
+  assert.equal(result.path, originalPath);
+  assert.equal(result.record.sourceDisposition, 'kept');
+  assert.equal(result.record.movedTo, '');
+  assert.equal(manager.catalog.length, 1);
+  assert.equal((await fs.stat(path.join(originalPath, 'one.bin'))).size, 3);
   await assert.rejects(fs.access(movedPath), /ENOENT/);
 });
 

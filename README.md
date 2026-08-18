@@ -1,18 +1,21 @@
 <div align="center">
 
-<img src="assets/app-icon.png" alt="Hamster Archive 图标" width="112">
+<img src="README.assets/iconC_cropped_1022x1022.png" alt="Hamster Archive 像素仓鼠图标" width="112">
 
 # 仓鼠症大结局 Hamster Archive
 
 ### 把散乱的大文件变成可校验的压缩包，也变成能搜索、能预览的本地仓库
 
+Local-first batch archiver and searchable media vault for Windows.
+
 本地优先 · 批量归档 · 媒体预览 · 便携数据
 
-![Version](https://img.shields.io/badge/version-4.0.0-d45f3c?style=flat-square)
+![Version](https://img.shields.io/badge/version-4.1.0-d45f3c?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-23211d?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-2f7558?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-43-456f83?style=flat-square)
 ![SQLite](https://img.shields.io/badge/SQLite-WAL-b17422?style=flat-square)
+[![CI](https://github.com/CarlosZ16420/hamster-archiver/actions/workflows/ci.yml/badge.svg)](https://github.com/CarlosZ16420/hamster-archiver/actions/workflows/ci.yml)
 
 [下载发行版](../../releases) · [报告问题](../../issues) · [参与贡献](CONTRIBUTING.md)
 
@@ -56,6 +59,8 @@
 
 仓库不是一张压缩包清单。它提供封面浏览、活跃度统计和随机漫步。搜索覆盖标题、标签、备注、路径与文件名；列表分页，目录树按可视区域渲染，适合逐渐增长的库存。
 
+仓库支持白昼与黑夜主题；活跃度按每日入库项目数分级，达到 100 项/天才使用最深颜色。
+
 项目中不仅包含了视频、图片的缩略截图，还包含完整的目录结构。每张图片都是恰到好处的缩略图，保存信息的同时也控制自身体积。
 
 视频截取帧数、项目保存缩略图个数等参数均自由可调。
@@ -89,7 +94,8 @@
 
 - 每个项目保存独立的隐藏原始路径字段，旧记录缺少该字段时会安全补为空值。
 - 未移动的项目显示原路径；已移动或进入回收站的项目显示当前状态。
-- 应用会分批、低频粗略核验已移动或已回收的项目；预期位置不存在时标为“原文件已消失”，之后不再重复检查。
+- 详情页可打开原文件当前位置；回收站中的项目可确认复原到原位置，成功后自动打开对应目录。
+- 应用启动后会在后台分批核验全部已移动或已回收的项目，并定期复查；预期位置不存在时标为“未发现原文件”，之后不再重复检查。
 - 删除仓库记录时，可选择尝试把已移动或已回收的原文件复原到原始位置；复原失败不会继续删除记录和压缩包。
 
 ### 仓库整理
@@ -114,8 +120,8 @@
 环境：Windows、Node.js 22+、npm。
 
 ```powershell
-git clone https://github.com/CarlosZ16420/hamster-archive-desktop.git
-cd hamster-archive-desktop
+git clone https://github.com/CarlosZ16420/hamster-archiver.git
+cd hamster-archiver
 npm install
 npm run check
 npm test
@@ -127,7 +133,7 @@ npm start
 ## 便携数据布局
 
 ```text
-HamsterArchive-v4.0.0-win-x64/
+HamsterArchive-v4.1.0-win-x64/
 ├─ HamsterArchive.exe
 ├─ tools/
 │  ├─ 7zip/
@@ -156,7 +162,7 @@ HamsterArchive-v4.0.0-win-x64/
 | 性能 | 仓库分页、目录虚拟化、持久化搜索与相似候选索引 |
 | 隐私 | 用户数据留在本机；不上传仓库、媒体或密码 |
 
-应用不会主动上传文件。只有在你点击“检查更新”或打开 GitHub 链接时，才会访问 GitHub；压缩包上传仍由你的云盘客户端或手动操作完成。
+应用不会主动上传文件。只有在你点击“检查更新”或打开 GitHub 链接时，才会访问 GitHub；更新包会先下载到 userdata 的临时区，校验后由独立更新助手替换程序文件；压缩包上传仍由你的云盘客户端或手动操作完成。
 
 ## 开发与贡献
 
@@ -178,6 +184,6 @@ npm run publish:check
 
 欢迎试用、提交 Issue 或 Pull Request。你的反馈会帮助这个小工具变得更稳、更顺手。
 
-[GitHub 仓库](https://github.com/CarlosZ16420/hamster-archive-desktop) · [欢迎反馈](https://github.com/CarlosZ16420/hamster-archive-desktop/issues)
+[GitHub 仓库](https://github.com/CarlosZ16420/hamster-archiver) · [欢迎反馈](https://github.com/CarlosZ16420/hamster-archiver/issues)
 
 </div>

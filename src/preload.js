@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('archiveApp', {
   saveConfig: (config) => ipcRenderer.invoke('config:save', config),
   scanSource: (intakeDirectory) => ipcRenderer.invoke('source:scan', intakeDirectory),
   addSingle: (sourcePath) => ipcRenderer.invoke('task:add-single', sourcePath),
+  openTaskSource: (jobId) => ipcRenderer.invoke('task:open-source', jobId),
   getDroppedPath: (file) => webUtils.getPathForFile(file),
   confirmTask: (jobId) => ipcRenderer.invoke('task:confirm', jobId),
   confirmAnomaly: (jobId) => ipcRenderer.invoke('task:confirm-anomaly', jobId),
@@ -40,6 +41,8 @@ contextBridge.exposeInMainWorld('archiveApp', {
   getWarehouseInsights: () => ipcRenderer.invoke('catalog:insights'),
   getRandomCatalogRecord: (excludeId) => ipcRenderer.invoke('catalog:random', excludeId),
   getCatalogDetails: (recordId) => ipcRenderer.invoke('catalog:details', recordId),
+  openCatalogSource: (recordId) => ipcRenderer.invoke('catalog:open-source', recordId),
+  restoreCatalogSource: (recordId) => ipcRenderer.invoke('catalog:restore-source', recordId),
   updateCatalogMetadata: (recordId, metadata) => ipcRenderer.invoke('catalog:update-metadata', recordId, metadata),
   recalculateCatalogSimilarity: (recordId) => ipcRenderer.invoke('catalog:recalculate-similarity', recordId),
   removeCatalogSimilarity: (recordId, similarId) => ipcRenderer.invoke('catalog:remove-similarity', recordId, similarId),
@@ -63,5 +66,8 @@ contextBridge.exposeInMainWorld('archiveApp', {
   },
   onScanProgress: (callback) => {
     ipcRenderer.on('scan:progress', (_event, progress) => callback(progress));
+  },
+  onUpdateProgress: (callback) => {
+    ipcRenderer.on('update:progress', (_event, progress) => callback(progress));
   }
 });

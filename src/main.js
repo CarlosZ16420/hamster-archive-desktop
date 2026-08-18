@@ -19,6 +19,11 @@ const { makeUserDataLayout } = require('./core/storage-paths');
 const { IMAGE_EXTENSIONS, isVideoFile } = require('./core/constants');
 const { extractVideoFrames } = require('./core/media-service');
 const { checkForUpdates } = require('./core/update-checker');
+const {
+  prepareUpdate,
+  launchUpdate,
+  cleanupSuccessfulUpdateRuns
+} = require('./core/update-manager');
 const { findTrashItems, isTrashItemPresent, restoreTrashItem } = require('./core/recycle-bin');
 
 const appIconPath = path.join(__dirname, '..', 'assets', 'app-icon.png');
@@ -181,6 +186,24 @@ async function pathExists(targetPath) {
   }
 }
 
+async function openItemLocation(targetPath, label = '文件位置') {
+  const resolvedPath = path.resolve(String(targetPath || '').trim());
+  let stats;
+  try {
+    stats = await fs.stat(resolvedPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') throw new Error(`${label}已经不存在。`);
+    throw error;
+  }
+  if (stats.isDirectory()) {
+    const message = await shell.openPath(resolvedPath);
+    if (message) throw new Error(`无法打开${label}：${message}`);
+  } else {
+    shell.showItemInFolder(resolvedPath);
+  }
+  return resolvedPath;
+}
+
 function assertTrustedSender(event) {
   const senderUrl = event.senderFrame?.url || '';
   if (!senderUrl.startsWith('file://')) {
@@ -240,13 +263,13 @@ function createWindow() {
       const bridgeStatus = await mainWindow.webContents.executeJavaScript(`(() => {
         const required = [
           'getState', 'chooseDirectory', 'chooseProgram', 'changeWarehouseLocation', 'openWarehouse', 'exportWarehouse', 'importWarehouse', 'checkForUpdates', 'openUserData', 'openExternal', 'copyText', 'chooseSingle', 'saveConfig', 'scanSource',
-          'addSingle', 'getDroppedPath', 'confirmTask', 'confirmAnomaly', 'cancelTask', 'retryTask', 'startQueue',
+          'addSingle', 'openTaskSource', 'getDroppedPath', 'confirmTask', 'confirmAnomaly', 'cancelTask', 'retryTask', 'startQueue',
           'discardAnomaly', 'pauseQueue', 'resumeQueue', 'removeJobs', 'clearCompletedJobs', 'clearQueue', 'clearPotentialDuplicates', 'confirmAllDuplicates', 'finishNextAndPause', 'searchCatalog',
           'getCatalogSuggestions', 'openSimilarityIgnoreTerms', 'reloadSimilarityIgnoreTerms',
           'getWarehouseInsights', 'getRandomCatalogRecord',
-          'getCatalogDetails', 'updateCatalogMetadata', 'recalculateCatalogSimilarity', 'removeCatalogSimilarity', 'addManualCatalogRecord', 'addCatalogImage',
+          'getCatalogDetails', 'openCatalogSource', 'restoreCatalogSource', 'updateCatalogMetadata', 'recalculateCatalogSimilarity', 'removeCatalogSimilarity', 'addManualCatalogRecord', 'addCatalogImage',
           'setCatalogCover', 'addTagsToCatalogRecords', 'updateBackupLocationForCatalogRecords', 'undoCatalogAction', 'deleteCatalogRecords', 'getThumbnail',
-          'onStateChanged', 'onTaskProgress', 'onCatalogChanged', 'onScanProgress'
+          'onStateChanged', 'onTaskProgress', 'onCatalogChanged', 'onScanProgress', 'onUpdateProgress'
         ];
         return {
           exists: typeof window.archiveApp === 'object',
@@ -612,17 +635,61 @@ function registerIpc() {
       });
       return result;
     }
+    if (!result.installable) {
+      const response = await dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: '发现新版本',
+        message: `可以更新到 ${result.latestVersion}`,
+        detail: '当前 Release 没有可识别的 Windows 便携包，将打开 GitHub 页面供你手动下载。',
+        buttons: ['打开发布页', '稍后'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true
+      });
+      if (response.response === 0) await shell.openExternal(result.releaseUrl);
+      return result;
+    }
+    if (queueManager.running) throw new Error('归档任务运行期间不能更新，请先暂停或完成当前任务。');
     const response = await dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: '发现新版本',
       message: `可以更新到 ${result.latestVersion}`,
-      detail: `当前版本：${result.currentVersion}\n建议前往 GitHub 查看发行说明并下载。`,
-      buttons: ['前往 GitHub', '稍后'],
+      detail: `当前版本：${result.currentVersion}\n更新包大小：${Math.max(1, Math.round((result.asset.size || 0) / (1024 * 1024)))} MB\n程序会自动下载、校验并重启；userdata 不会被覆盖。`,
+      buttons: ['下载并重启更新', '打开发布页', '稍后'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true
+    });
+    if (response.response === 1) {
+      await shell.openExternal(result.releaseUrl);
+      return result;
+    }
+    if (response.response !== 0) return result;
+    const prepared = await prepareUpdate({
+      applicationRoot,
+      userDataDirectory: queueManager.config.userDataDirectory,
+      sevenZipPath: resolveApplicationPath(applicationRoot, queueManager.config.sevenZipPath),
+      currentVersion: result.currentVersion,
+      release: result,
+      fetchImpl: net.fetch,
+      onProgress: (progress) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update:progress', progress);
+      }
+    });
+    const restart = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '更新包已准备好',
+      message: `Hamster Archive ${result.latestVersion} 已下载并校验完成。`,
+      detail: '点击“立即重启”后，程序会退出、替换程序文件并自动启动新版本。userdata、仓库和压缩包不会被覆盖。',
+      buttons: ['立即重启', '稍后'],
       defaultId: 0,
       cancelId: 1,
       noLink: true
     });
-    if (response.response === 0) await shell.openExternal(result.releaseUrl);
+    if (restart.response !== 0) return { ...result, staged: true };
+    await launchUpdate({ prepared, targetPid: process.pid });
+    allowWindowClose = true;
+    app.quit();
     return result;
   });
 
@@ -692,6 +759,14 @@ function registerIpc() {
   ipcMain.handle('task:add-single', async (event, sourcePath) => {
     assertTrustedSender(event);
     return queueManager.addSingle(sourcePath);
+  });
+
+  ipcMain.handle('task:open-source', async (event, jobId) => {
+    assertTrustedSender(event);
+    const job = queueManager.jobs.find((candidate) => candidate.id === jobId);
+    if (!job?.sourcePath) throw new Error('这个任务没有可打开的原文件位置。');
+    await openItemLocation(job.sourcePath, '任务位置');
+    return true;
   });
 
   ipcMain.handle('task:confirm', async (event, jobId) => {
@@ -786,6 +861,30 @@ function registerIpc() {
   ipcMain.handle('catalog:details', (event, recordId) => {
     assertTrustedSender(event);
     return queueManager.getCatalogDetails(recordId);
+  });
+
+  ipcMain.handle('catalog:open-source', async (event, recordId) => {
+    assertTrustedSender(event);
+    const record = queueManager.catalog.find((candidate) => candidate.id === recordId);
+    if (!record) throw new Error('没有找到指定仓库记录。');
+    const originalPath = String(record.originalSourcePath || '').trim();
+    if (record.sourceDisposition === 'trashed') {
+      if (!originalPath) throw new Error('没有记录原文件位置，无法从回收站复原。');
+      return { status: 'trashed', path: originalPath };
+    }
+    const currentPath = record.sourceDisposition === 'moved'
+      ? String(record.movedTo || '').trim()
+      : originalPath;
+    if (!currentPath) throw new Error('没有记录可打开的原文件当前位置。');
+    const openedPath = await openItemLocation(currentPath, '原文件位置');
+    return { status: 'opened', path: openedPath };
+  });
+
+  ipcMain.handle('catalog:restore-source', async (event, recordId) => {
+    assertTrustedSender(event);
+    const result = await queueManager.restoreCatalogSource(recordId);
+    await openItemLocation(result.path, '复原后的原文件位置');
+    return result;
   });
 
   ipcMain.handle('catalog:update-metadata', async (event, recordId, metadata) => {
@@ -893,6 +992,9 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     resolveProgramPath: (configuredPath) => resolveApplicationPath(workspaceRoot, configuredPath)
   });
   await queueManager.initialize();
+  await cleanupSuccessfulUpdateRuns(userDataLayout.root).catch((error) => {
+    console.warn(`UPDATE_CLEANUP_WARNING ${error.message}`);
+  });
   if (isSmokeTest && process.env.HAMSTER_SMOKE_IMPORT_DIRECTORY) {
     const importDirectory = path.resolve(process.env.HAMSTER_SMOKE_IMPORT_DIRECTORY);
     const smokeToolRoot = process.env.HAMSTER_SMOKE_TOOL_ROOT
@@ -944,12 +1046,12 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   }, 15_000);
   scheduleTimer.unref?.();
   sourceAuditStartupTimer = setTimeout(() => {
-    void queueManager.auditTrackedSourceLocations({ limit: 20 })
+    void queueManager.auditTrackedSourceLocations()
       .catch((error) => console.error('SOURCE_AUDIT_ERROR', error));
-  }, 20_000);
+  }, 5_000);
   sourceAuditStartupTimer.unref?.();
   sourceAuditTimer = setInterval(() => {
-    void queueManager.auditTrackedSourceLocations({ limit: 30 })
+    void queueManager.auditTrackedSourceLocations()
       .catch((error) => console.error('SOURCE_AUDIT_ERROR', error));
   }, 30 * 60_000);
   sourceAuditTimer.unref?.();
@@ -1101,6 +1203,13 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
       mainWindow.webContents.send('scan:progress', progress);
     }
   });
+
+  if (process.env.HAMSTER_UPDATE_VALIDATION_FILE) {
+    await fs.writeFile(process.env.HAMSTER_UPDATE_VALIDATION_FILE, JSON.stringify({
+      version: app.getVersion(),
+      validatedAt: new Date().toISOString()
+    }), 'utf8');
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

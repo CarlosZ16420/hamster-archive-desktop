@@ -138,6 +138,16 @@ let similarityManageRecordId = null;
 const selectedJobIds = new Set();
 const selectedCatalogIds = new Set();
 
+const themeMode = document.querySelector('#theme-mode');
+function applyTheme(theme) {
+  const nextTheme = theme === 'night' ? 'night' : 'day';
+  document.body.dataset.theme = nextTheme;
+  if (themeMode) themeMode.value = nextTheme;
+  localStorage.setItem('hamster-theme', nextTheme);
+}
+applyTheme(localStorage.getItem('hamster-theme') || 'day');
+themeMode?.addEventListener('change', () => applyTheme(themeMode.value));
+
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
@@ -262,10 +272,12 @@ function formatDecimalGb(bytes) {
 function activityLevel(entry, maxBytes, maxCount) {
   if (entry.future) return -1;
   if (entry.inventoryCount === 0) return 0;
-  if (maxBytes > 0 && entry.originalBytes > 0) {
-    return Math.max(1, Math.ceil((Math.log1p(entry.originalBytes) / Math.log1p(maxBytes)) * 4));
-  }
-  return Math.max(1, Math.ceil((entry.inventoryCount / Math.max(1, maxCount)) * 4));
+  // 活跃度以“每天入库项目数”为主：100 项/天才进入最深颜色，避免单个大项目盖过日常整理量。
+  const count = Number(entry.inventoryCount) || 0;
+  if (count >= 100) return 4;
+  if (count >= 30) return 3;
+  if (count >= 10) return 2;
+  return 1;
 }
 
 function renderWarehouseInsights(insights) {
@@ -274,12 +286,10 @@ function renderWarehouseInsights(insights) {
   elements.metricTags.textContent = Number(insights.uniqueTagCount || 0).toLocaleString('zh-CN');
   elements.metricGb.textContent = formatDecimalGb(insights.totalOriginalBytes);
 
-  const maxBytes = Math.max(0, ...insights.activity.map((entry) => entry.originalBytes || 0));
-  const maxCount = Math.max(0, ...insights.activity.map((entry) => entry.inventoryCount || 0));
   elements.activityGrid.replaceChildren();
   for (const entry of insights.activity) {
     const cell = make('span', 'activity-cell');
-    const level = activityLevel(entry, maxBytes, maxCount);
+    const level = activityLevel(entry);
     cell.dataset.level = String(level);
     const dateLabel = new Date(`${entry.date}T12:00:00`).toLocaleDateString('zh-CN', {
       year: 'numeric', month: 'long', day: 'numeric', weekday: 'short'
@@ -362,6 +372,13 @@ function renderDiscovery(title, description, records) {
 }
 
 async function openDiscoveryRecord(recordId) {
+  await loadCatalogDetails(recordId);
+  elements.catalogDetail.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function jumpToCatalogRecord(recordId) {
+  const libraryButton = document.querySelector('.nav-button[data-page="library-page"]');
+  libraryButton?.click();
   await loadCatalogDetails(recordId);
   elements.catalogDetail.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -524,7 +541,11 @@ function renderJobs(jobs) {
     copyName.type = 'button';
     copyName.dataset.copyJobName = job.displayName;
     copyName.setAttribute('aria-label', `复制任务名 ${job.displayName}`);
-    nameLine.append(make('strong', '', job.displayName), copyName);
+    const openName = make('button', 'copy-job-name', '打开');
+    openName.type = 'button';
+    openName.dataset.openJobSource = job.id;
+    openName.setAttribute('aria-label', `打开任务位置 ${job.displayName}`);
+    nameLine.append(make('strong', '', job.displayName), copyName, openName);
     nameCell.append(nameLine, make('small', '', job.sourcePath));
     row.append(nameCell);
     row.append(make('td', '', String(job.fileCount)));
@@ -543,6 +564,15 @@ function renderJobs(jobs) {
     row.append(progressCell);
 
     const actionCell = make('td', 'row-actions');
+    const catalogSimilar = [
+      ...(job.nameDuplicateMatches || []).map((match) => match.archiveId),
+      ...(job.similarMatches || []).map((match) => match.id)
+    ].find((id) => id && currentState?.catalog?.some((record) => record.id === id));
+    if (['awaiting_confirmation', 'awaiting_duplicate_confirmation'].includes(job.status) && catalogSimilar) {
+      const jump = actionButton('查看相似项目', 'view-similar', job.id, 'ghost');
+      jump.dataset.similarRecord = catalogSimilar;
+      actionCell.append(jump);
+    }
     if (job.status === 'awaiting_confirmation') {
       const label = job.confirmationReasons?.includes('large_task') ? '确认并按 10G 分卷' : '确认重复风险';
       actionCell.append(actionButton(label, 'confirm', job.id, 'confirm'));
@@ -663,8 +693,6 @@ function renderCatalog(catalog) {
       }
       info.append(tags);
     }
-    const sourceLocation = sourceLocationPresentation(record);
-    info.append(make('small', 'source-location-chip', `原文件位置：${sourceLocation.text}`));
     if (record.backupLocation) {
       info.append(make('span', 'backup-location-chip', `备份 · ${record.backupLocation}`));
     }
@@ -1162,17 +1190,17 @@ function isHttpUrl(value) {
 function sourceLocationPresentation(record) {
   const originalPath = String(record.originalSourcePath || record.sourcePath || '').trim();
   if (record.sourceDisposition === 'missing') {
-    return { text: '未发现原文件', value: '', isPath: false };
+    return { text: '未发现原文件', value: '', isPath: false, canOpen: false };
   }
   if (record.sourceDisposition === 'trashed') {
-    return { text: '源文件已进入回收站', value: '', isPath: false };
+    return { text: '源文件已进入回收站', value: originalPath, isPath: false, canOpen: Boolean(originalPath), inTrash: true };
   }
   if (record.sourceDisposition === 'moved') {
     const movedTo = String(record.movedTo || '').trim();
-    return { text: movedTo ? `已移动到：${movedTo}` : '源文件已移动', value: '', isPath: false };
+    return { text: movedTo ? `已移动到：${movedTo}` : '源文件已移动', value: movedTo, isPath: false, canOpen: Boolean(movedTo) };
   }
-  if (originalPath) return { text: originalPath, value: originalPath, isPath: true };
-  return { text: '未记录', value: '', isPath: false };
+  if (originalPath) return { text: originalPath, value: originalPath, isPath: true, canOpen: true };
+  return { text: '未记录', value: '', isPath: false, canOpen: false };
 }
 
 function renderSimilarProjects(record) {
@@ -1237,6 +1265,13 @@ function renderCatalogDetail(record) {
       sourceLine.append(sourceLink);
     } else {
       sourceLine.append(document.createTextNode(sourceLocation.text));
+    }
+    if (sourceLocation.canOpen && !isHttpUrl(sourceLocation.value)) {
+      const openSource = make('button', 'mini-copy-button', '打开');
+      openSource.type = 'button';
+      openSource.dataset.openSource = record.id;
+      openSource.title = sourceLocation.inTrash ? '从回收站复原到原位置' : '打开原文件当前位置';
+      sourceLine.append(openSource);
     }
     heading.append(sourceLine);
   }
@@ -1463,6 +1498,16 @@ elements.archiveOutputDirectory.addEventListener('input', () => {
 });
 
 document.querySelector('#save-settings').addEventListener('click', saveConfig);
+window.archiveApp.onUpdateProgress((progress) => {
+  const button = document.querySelector('#check-for-updates');
+  if (!button || progress?.stage === 'prepared') return;
+  if (progress.stage === 'verifying') button.textContent = '正在校验更新…';
+  else if (progress.stage === 'downloading') {
+    button.textContent = progress.totalBytes
+      ? `下载更新 ${progress.percentage}%`
+      : '正在下载更新…';
+  }
+});
 document.querySelector('#check-for-updates').addEventListener('click', async () => {
   const button = document.querySelector('#check-for-updates');
   button.disabled = true;
@@ -1647,10 +1692,20 @@ elements.taskList.addEventListener('click', async (event) => {
     if (copied) showToast('任务名称已复制');
     return;
   }
+  const openJob = event.target.closest('button[data-open-job-source]');
+  if (openJob) {
+    const opened = await safely(() => window.archiveApp.openTaskSource(openJob.dataset.openJobSource));
+    if (opened) showToast('已打开任务所在位置');
+    return;
+  }
   const button = event.target.closest('button[data-action]');
   if (button) {
     const { action, jobId } = button.dataset;
     let state;
+    if (action === 'view-similar') {
+      await jumpToCatalogRecord(button.dataset.similarRecord);
+      return;
+    }
     if (action === 'confirm') state = await safely(() => window.archiveApp.confirmTask(jobId));
     if (action === 'confirm-anomaly') {
       if (!window.confirm('完整性测试已经通过，但压缩前后体积比例超出安全阈值。请先人工核对日志和源项目；确认仍要入库吗？')) return;
@@ -1891,6 +1946,25 @@ elements.warehouseDiscovery.addEventListener('click', (event) => {
 });
 
 elements.catalogDetail.addEventListener('click', (event) => {
+  const openSource = event.target.closest('button[data-open-source]');
+  if (openSource) {
+    void safely(() => window.archiveApp.openCatalogSource(openSource.dataset.openSource)).then(async (result) => {
+      if (!result) return;
+      if (result.status === 'trashed') {
+        if (!window.confirm('该原文件在 Windows 回收站中。要将文件从回收站移出到原位置吗？')) return;
+        const restored = await safely(() => window.archiveApp.restoreCatalogSource(openSource.dataset.openSource));
+        if (!restored) return;
+        renderCatalogDetail(restored.record);
+        const state = await safely(() => window.archiveApp.getState());
+        if (state) render(state);
+        await refreshCatalog(true);
+        showToast('原文件已复原，并已打开原位置');
+      } else {
+        showToast('已打开原文件当前位置');
+      }
+    });
+    return;
+  }
   const external = event.target.closest('button[data-external-url]');
   if (external) {
     void safely(() => window.archiveApp.openExternal(external.dataset.externalUrl));

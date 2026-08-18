@@ -1,7 +1,7 @@
 'use strict';
 
-const RELEASES_URL = 'https://github.com/CarlosZ16420/hamster-archive-desktop/releases';
-const LATEST_RELEASE_API = 'https://api.github.com/repos/CarlosZ16420/hamster-archive-desktop/releases/latest';
+const RELEASES_URL = 'https://github.com/CarlosZ16420/hamster-archiver/releases';
+const LATEST_RELEASE_API = 'https://api.github.com/repos/CarlosZ16420/hamster-archiver/releases/latest';
 
 function versionParts(value) {
   const match = String(value || '').trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
@@ -38,11 +38,22 @@ async function checkForUpdates({ currentVersion, fetchImpl = globalThis.fetch, t
   if (!response.ok) throw new Error(`GitHub 更新检查失败（HTTP ${response.status}）。`);
   const release = await response.json();
   const latestVersion = String(release.tag_name || '').replace(/^v/i, '');
+  const assets = Array.isArray(release.assets) ? release.assets : [];
+  const archiveAsset = assets.find((asset) =>
+    String(asset.name || '').toLowerCase() === `hamsterarchive-v${latestVersion}-win-x64.zip`.toLowerCase()
+  ) || assets.find((asset) => String(asset.name || '').toLowerCase().endsWith('.zip'));
   return {
     currentVersion,
     latestVersion,
     updateAvailable: compareVersions(latestVersion, currentVersion) > 0,
-    releaseUrl: release.html_url || RELEASES_URL
+    releaseUrl: release.html_url || RELEASES_URL,
+    installable: Boolean(archiveAsset?.browser_download_url),
+    asset: archiveAsset ? {
+      name: String(archiveAsset.name || ''),
+      downloadUrl: String(archiveAsset.browser_download_url || ''),
+      size: Number(archiveAsset.size) || 0,
+      digest: String(archiveAsset.digest || '')
+    } : null
   };
 }
 

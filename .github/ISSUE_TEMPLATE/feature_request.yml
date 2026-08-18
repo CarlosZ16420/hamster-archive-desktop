@@ -1,0 +1,23 @@
+name: 功能建议
+description: 描述一个明确、重复出现的使用问题或改进机会。
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 使用场景与问题
+      description: 目前在什么情况下不方便？请尽量描述目标，而不只描述按钮样式。
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 希望达到的结果
+      description: 完成后，用户应该能够看到或做到什么？
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 已尝试的方法或补充说明

@@ -341,7 +341,7 @@ class QueueManager extends EventEmitter {
     this.progressEmissionTimer = null;
     this.pendingProgress = null;
     this.randomWalkBag = [];
-    this.sourceAuditCursor = 0;
+    this.sourceAuditRunning = false;
     this.services = services;
   }
 
@@ -733,69 +733,80 @@ class QueueManager extends EventEmitter {
     return this.summarizeCatalogRecord(record);
   }
 
-  async auditTrackedSourceLocations({ limit = 30 } = {}) {
+  async auditTrackedSourceLocations({ limit = Number.POSITIVE_INFINITY, batchSize = 100 } = {}) {
+    if (this.sourceAuditRunning) return { checked: 0, missing: 0, alreadyRunning: true };
     const candidates = this.catalog.filter((record) => ['moved', 'trashed'].includes(record.sourceDisposition));
     if (candidates.length === 0) return { checked: 0, missing: 0 };
-    const safeLimit = Math.max(1, Math.min(100, Number(limit) || 30));
-    const batch = [];
-    for (let offset = 0; offset < Math.min(safeLimit, candidates.length); offset += 1) {
-      batch.push(candidates[(this.sourceAuditCursor + offset) % candidates.length]);
-    }
-    this.sourceAuditCursor = (this.sourceAuditCursor + batch.length) % candidates.length;
-
+    const numericLimit = Number(limit);
+    const selected = Number.isFinite(numericLimit)
+      ? candidates.slice(0, Math.max(1, Math.min(candidates.length, Math.floor(numericLimit))))
+      : candidates;
+    const safeBatchSize = Math.max(1, Math.min(100, Math.floor(Number(batchSize) || 100)));
     let missing = 0;
-    let trashPresence = null;
-    let trashAuditUnavailable = false;
-    const trashPaths = batch
-      .filter((record) => record.sourceDisposition === 'trashed')
-      .map(getOriginalSourcePath)
-      .filter(Boolean);
-    if (trashPaths.length > 0 && this.services.findTrashItems) {
-      try {
-        const found = await this.services.findTrashItems(trashPaths);
-        trashPresence = new Set(found.map((item) => normalizeForComparison(item)));
-      } catch (error) {
-        trashAuditUnavailable = true;
-        await this.log('warning', `Windows 回收站批量核验暂时失败：${error.message}`, null, false);
-      }
-    }
-    for (const record of batch) {
-      let present = true;
-      try {
-        if (record.sourceDisposition === 'moved') {
-          const expectedPath = String(record.movedTo || '').trim();
-          present = Boolean(expectedPath) && await (this.services.pathExists || (async (targetPath) => {
-            try { await fs.access(targetPath); return true; } catch (error) {
-              if (error.code === 'ENOENT') return false;
-              throw error;
-            }
-          }))(expectedPath);
-        } else {
-          const originalPath = getOriginalSourcePath(record);
-          if (!originalPath) continue;
-          if (trashAuditUnavailable) continue;
-          if (trashPresence) present = trashPresence.has(normalizeForComparison(originalPath));
-          else if (this.services.isTrashItemPresent) present = await this.services.isTrashItemPresent(originalPath);
-          else continue;
+    this.sourceAuditRunning = true;
+    try {
+      await this.log('info', `开始后台核验 ${selected.length} 个原文件位置。`, null, false);
+      for (let start = 0; start < selected.length; start += safeBatchSize) {
+        const batch = selected.slice(start, start + safeBatchSize);
+        let trashPresence = null;
+        let trashAuditUnavailable = false;
+        const trashPaths = batch
+          .filter((record) => record.sourceDisposition === 'trashed')
+          .map(getOriginalSourcePath)
+          .filter(Boolean);
+        if (trashPaths.length > 0 && this.services.findTrashItems) {
+          try {
+            const found = await this.services.findTrashItems(trashPaths);
+            trashPresence = new Set(found.map((item) => normalizeForComparison(item)));
+          } catch (error) {
+            trashAuditUnavailable = true;
+            await this.log('warning', `Windows 回收站批量核验暂时失败：${error.message}`, null, false);
+          }
         }
-      } catch (error) {
-        await this.log('warning', `原文件位置核验暂时失败：${record.title} · ${error.message}`, record.jobId, false);
-        continue;
+        for (const record of batch) {
+          const originalPath = getOriginalSourcePath(record);
+          let present = true;
+          try {
+            if (!originalPath) {
+              present = false;
+            } else if (record.sourceDisposition === 'moved') {
+              const expectedPath = String(record.movedTo || '').trim();
+              present = Boolean(expectedPath) && await (this.services.pathExists || (async (targetPath) => {
+                try { await fs.access(targetPath); return true; } catch (error) {
+                  if (error.code === 'ENOENT') return false;
+                  throw error;
+                }
+              }))(expectedPath);
+            } else {
+              if (trashAuditUnavailable) continue;
+              if (trashPresence) present = trashPresence.has(normalizeForComparison(originalPath));
+              else if (this.services.isTrashItemPresent) present = await this.services.isTrashItemPresent(originalPath);
+              else continue;
+            }
+          } catch (error) {
+            await this.log('warning', `原文件位置核验暂时失败：${record.title} · ${error.message}`, record.jobId, false);
+            continue;
+          }
+          record.sourceLocationCheckedAt = new Date().toISOString();
+          if (present) continue;
+          record.sourceDisposition = 'missing';
+          record.originalSourcePath = '';
+          record.movedTo = '';
+          record.metadataUpdatedAt = new Date().toISOString();
+          missing += 1;
+          await this.log('warning', `原文件已不在记录位置，状态已更新为“未发现原文件”：${record.title}`, record.jobId, false);
+        }
+        await new Promise((resolve) => setImmediate(resolve));
       }
-      record.sourceLocationCheckedAt = new Date().toISOString();
-      if (present) continue;
-      record.sourceDisposition = 'missing';
-      record.originalSourcePath = '';
-      record.movedTo = '';
-      record.metadataUpdatedAt = new Date().toISOString();
-      missing += 1;
-      await this.log('warning', `原文件已不在记录的回收站或移动位置，状态已更新为“原文件已消失”：${record.title}`, record.jobId, false);
+      if (missing > 0) {
+        await this.store.saveCatalog(this.config.repositoryDirectory, this.catalog);
+        this.emitState();
+      }
+      await this.log('info', `原文件位置核验完成：检查 ${selected.length} 项，更新 ${missing} 项。`, null, false);
+      return { checked: selected.length, missing };
+    } finally {
+      this.sourceAuditRunning = false;
     }
-    if (missing > 0) {
-      await this.store.saveCatalog(this.config.repositoryDirectory, this.catalog);
-      this.emitState();
-    }
-    return { checked: batch.length, missing };
   }
 
   refreshSimilarityForRecord(record) {
@@ -1184,8 +1195,24 @@ class QueueManager extends EventEmitter {
     record.movedTo = '';
     record.sourceLocationCheckedAt = new Date().toISOString();
     record.metadataUpdatedAt = new Date().toISOString();
-    await this.log('warning', `删除仓库项目前，已把原文件复原到：${originalPath}`, record.jobId, false);
+    await this.log('warning', `已把原文件复原到：${originalPath}`, record.jobId, false);
     return true;
+  }
+
+  async restoreCatalogSource(recordId) {
+    const record = this.catalog.find((candidate) => candidate.id === recordId);
+    if (!record) throw new Error('没有找到指定仓库记录。');
+    const pathExists = this.services.pathExists || (async (targetPath) => {
+      try { await fs.access(targetPath); return true; } catch (error) {
+        if (error.code === 'ENOENT') return false;
+        throw error;
+      }
+    });
+    const restored = await this.restoreOriginalSourceForRecord(record, pathExists);
+    if (!restored) throw new Error('当前原文件不在可复原状态。');
+    await this.store.saveCatalog(this.config.repositoryDirectory, this.catalog);
+    this.emitState();
+    return { record: this.getCatalogDetails(recordId), path: getOriginalSourcePath(record) };
   }
 
   async deleteCatalogRecords(recordIds, options = {}) {

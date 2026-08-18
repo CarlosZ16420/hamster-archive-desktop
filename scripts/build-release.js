@@ -54,6 +54,10 @@ async function main() {
     await fs.copyFile(path.join(projectRoot, 'tools', 'ffmpeg', name), path.join(outputFfmpeg, name));
   }
   await fs.copyFile(path.join(projectRoot, 'README.md'), path.join(outputRoot, 'README.md'));
+  const readmeAssets = path.join(projectRoot, 'README.assets');
+  if (await exists(readmeAssets)) {
+    await fs.cp(readmeAssets, path.join(outputRoot, 'README.assets'), { recursive: true });
+  }
   await fs.copyFile(path.join(projectRoot, 'LICENSE'), path.join(outputRoot, 'LICENSE'));
   await fs.writeFile(path.join(appDirectory, 'package.json'), `${JSON.stringify({
     name: packageJson.name,
