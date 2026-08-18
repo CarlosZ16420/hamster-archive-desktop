@@ -8,6 +8,15 @@ const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
 
 const execFileAsync = promisify(execFile);
+const UPDATE_LAUNCH_TIMEOUT_MS = 8_000;
+
+const UPDATE_LAUNCHER_SCRIPT = String.raw`
+$ErrorActionPreference = 'Stop'
+$workerScript = Join-Path $PSScriptRoot 'apply-update.ps1'
+$powerShell = Join-Path $PSHOME 'powershell.exe'
+$quotedWorker = '"' + $workerScript.Replace('"', '\"') + '"'
+Start-Process -FilePath $powerShell -ArgumentList '-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$quotedWorker -WindowStyle Hidden | Out-Null
+`;
 
 const APPLY_UPDATE_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -15,6 +24,7 @@ $appRoot = [IO.Path]::GetFullPath([string]$env:HAMSTER_UPDATE_APP_ROOT)
 $stageRoot = [IO.Path]::GetFullPath([string]$env:HAMSTER_UPDATE_STAGE_ROOT)
 $runRoot = [IO.Path]::GetFullPath([string]$env:HAMSTER_UPDATE_RUN_ROOT)
 $validationFile = [IO.Path]::GetFullPath([string]$env:HAMSTER_UPDATE_VALIDATION_FILE)
+$startedFile = Join-Path $runRoot 'started.json'
 $targetPid = [int]$env:HAMSTER_UPDATE_TARGET_PID
 $version = [string]$env:HAMSTER_UPDATE_VERSION
 $logFile = Join-Path $runRoot 'update.log'
@@ -25,6 +35,7 @@ function Write-UpdateLog([string]$Message) {
 }
 
 try {
+  Set-Content -LiteralPath $startedFile -Value (@{ pid = $PID; startedAt = (Get-Date).ToString('o') } | ConvertTo-Json) -Encoding UTF8
   Write-UpdateLog "等待主程序退出：PID $targetPid"
   $deadline = (Get-Date).AddSeconds(90)
   while ($null -ne (Get-Process -Id $targetPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
@@ -48,8 +59,8 @@ try {
   }
   Write-UpdateLog "已写入版本 $version 的程序文件，启动验证进程。"
 
-  $newExe = Join-Path $appRoot 'HamsterArchive.exe'
-  if (-not (Test-Path -LiteralPath $newExe)) { throw '更新包中缺少 HamsterArchive.exe。' }
+  $newExe = Join-Path $appRoot 'HamsterArchiver.exe'
+  if (-not (Test-Path -LiteralPath $newExe)) { throw '更新包中缺少 HamsterArchiver.exe。' }
   $child = Start-Process -FilePath $newExe -WorkingDirectory $appRoot -PassThru
   $validationDeadline = (Get-Date).AddSeconds(45)
   while ((Get-Date) -lt $validationDeadline) {
@@ -60,6 +71,11 @@ try {
   if (-not (Test-Path -LiteralPath $validationFile)) {
     if (-not $child.HasExited) { Stop-Process -Id $child.Id -Force -ErrorAction SilentlyContinue }
     throw '新版本未在 45 秒内完成启动验证。'
+  }
+  $validatedVersion = [string]((Get-Content -LiteralPath $validationFile -Raw -Encoding UTF8 | ConvertFrom-Json).version)
+  if ($validatedVersion -ne $version) {
+    if (-not $child.HasExited) { Stop-Process -Id $child.Id -Force -ErrorAction SilentlyContinue }
+    throw "启动验证版本不一致：期望 $version，实际 $validatedVersion。"
   }
 
   Set-Content -LiteralPath (Join-Path $runRoot 'completed.json') -Value (@{ version = $version; completedAt = (Get-Date).ToString('o') } | ConvertTo-Json) -Encoding UTF8
@@ -79,12 +95,40 @@ catch {
       Copy-Item -LiteralPath $item.FullName -Destination (Join-Path $appRoot $item.Name) -Recurse -Force
     }
     Write-UpdateLog '已恢复旧版本程序文件。'
-    $oldExe = Join-Path $appRoot 'HamsterArchive.exe'
+    $oldExe = Join-Path $appRoot 'HamsterArchiver.exe'
     if (Test-Path -LiteralPath $oldExe) { Start-Process -FilePath $oldExe -WorkingDirectory $appRoot }
   }
   Set-Content -LiteralPath (Join-Path $runRoot 'failed.json') -Value (@{ version = $version; error = $_.Exception.Message; failedAt = (Get-Date).ToString('o') } | ConvertTo-Json) -Encoding UTF8
 }
 `;
+
+function manualUpdateInstructions(language = 'zh-CN') {
+  if (language === 'en-US') {
+    return [
+      '1. Exit Hamster Archiver and export the warehouse once from the old version as a safety copy.',
+      '2. Download the latest Windows x64 ZIP from GitHub Releases and extract it into a new directory. Do not replace only the EXE or overwrite a running directory.',
+      '3. With both versions closed, copy the complete userdata directory from the old version into the new version, replacing the new empty userdata.',
+      '4. Run HamsterArchiver.exe from the new directory. Verify the version, warehouse records and thumbnails before deleting the old directory.',
+      '5. If the copied userdata cannot be read, keep the old directory and import the warehouse archive exported in step 1.'
+    ].join('\n');
+  }
+  return [
+    '1. 先关闭 Hamster Archiver，并在旧版本的“仓库”中导出一次仓库作为保险。',
+    '2. 从 GitHub Releases 下载最新的 Windows x64 压缩包，完整解压到一个新文件夹；不要只替换 EXE，也不要覆盖正在运行的旧目录。',
+    '3. 在两个版本都关闭时，把旧版本目录中的 userdata 整个复制到新版本目录，覆盖新版本的空 userdata。',
+    '4. 运行新目录中的 HamsterArchiver.exe，确认版本号、仓库记录和缩略图正常后，再删除旧版本目录。',
+    '5. 如果复制 userdata 后仓库无法读取，请保留旧目录，在新版本中使用“并入外部仓库”导入第 1 步导出的仓库压缩包。'
+  ].join('\n');
+}
+
+function resolvePowerShellExecutable(environment = process.env, existsSync = fs.existsSync) {
+  const windowsRoot = environment.SystemRoot || environment.WINDIR;
+  if (windowsRoot) {
+    const systemPowerShell = path.join(windowsRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    if (existsSync(systemPowerShell)) return systemPowerShell;
+  }
+  return 'powershell.exe';
+}
 
 function normalizeDigest(value) {
   const match = String(value || '').trim().match(/^(?:sha256:)?([a-f0-9]{64})$/i);
@@ -103,7 +147,7 @@ async function downloadFile(url, targetPath, fetchImpl, onProgress = () => {}) {
     throw new Error('更新包地址不是受信任的 GitHub HTTPS 地址。');
   }
   const response = await fetchImpl(parsed.href, {
-    headers: { Accept: 'application/octet-stream', 'User-Agent': 'hamster-archive-update-manager' }
+    headers: { Accept: 'application/octet-stream', 'User-Agent': 'hamster-archiver-update-manager' }
   });
   if (!response.ok) throw new Error(`更新包下载失败（HTTP ${response.status}）。`);
   const totalBytes = Number(response.headers.get('content-length')) || 0;
@@ -140,7 +184,7 @@ async function locatePackageRoot(extractRoot) {
     if (entry.isDirectory()) candidates.push(path.join(extractRoot, entry.name));
   }
   for (const candidate of candidates) {
-    if (await exists(path.join(candidate, 'HamsterArchive.exe')) &&
+    if (await exists(path.join(candidate, 'HamsterArchiver.exe')) &&
         await exists(path.join(candidate, 'release-manifest.json'))) return candidate;
   }
   throw new Error('更新包目录结构无效，找不到程序文件。');
@@ -180,28 +224,162 @@ async function prepareUpdate({ applicationRoot, userDataDirectory, sevenZipPath,
   }
 }
 
-async function launchUpdate({ prepared, targetPid }) {
+async function waitForUpdaterStart(child, startedFile, {
+  timeoutMs = UPDATE_LAUNCH_TIMEOUT_MS,
+  intervalMs = 100,
+  existsImpl = exists,
+  delayImpl = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+} = {}) {
+  let launchError = null;
+  child.on('error', (error) => { launchError = error; });
+  await new Promise((resolve, reject) => {
+    const onSpawn = () => {
+      child.off('error', onInitialError);
+      resolve();
+    };
+    const onInitialError = (error) => {
+      child.off('spawn', onSpawn);
+      reject(error);
+    };
+    child.once('spawn', onSpawn);
+    child.once('error', onInitialError);
+  });
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await existsImpl(startedFile)) return;
+    if (launchError) throw launchError;
+    if (child.exitCode !== null && child.exitCode !== undefined && child.exitCode !== 0) {
+      throw new Error(`PowerShell 更新助手过早退出（代码 ${child.exitCode}）。`);
+    }
+    await delayImpl(intervalMs);
+  }
+  throw new Error(`PowerShell 更新助手在 ${Math.ceil(timeoutMs / 1000)} 秒内没有确认启动。`);
+}
+
+async function launchUpdate({ prepared, targetPid }, {
+  spawnImpl = spawn,
+  existsSyncImpl = fs.existsSync,
+  startupTimeoutMs = UPDATE_LAUNCH_TIMEOUT_MS,
+  startupPollIntervalMs = 100,
+  existsImpl = exists,
+  delayImpl
+} = {}) {
   const validationFile = path.join(prepared.runRoot, 'validation.json');
   const scriptPath = path.join(prepared.runRoot, 'apply-update.ps1');
-  await fsp.writeFile(scriptPath, APPLY_UPDATE_SCRIPT, 'utf8');
-  const child = spawn('powershell.exe', [
-    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath
-  ], {
-    detached: true,
-    windowsHide: true,
-    stdio: 'ignore',
-    env: {
-      ...process.env,
-      HAMSTER_UPDATE_APP_ROOT: prepared.applicationRoot,
-      HAMSTER_UPDATE_STAGE_ROOT: prepared.packageRoot,
-      HAMSTER_UPDATE_RUN_ROOT: prepared.runRoot,
-      HAMSTER_UPDATE_VALIDATION_FILE: validationFile,
-      HAMSTER_UPDATE_TARGET_PID: String(targetPid),
-      HAMSTER_UPDATE_VERSION: String(prepared.version)
+  const launcherScriptPath = path.join(prepared.runRoot, 'launch-update.ps1');
+  const startedFile = path.join(prepared.runRoot, 'started.json');
+  const launcherLogPath = path.join(prepared.runRoot, 'launcher.log');
+  await fsp.writeFile(scriptPath, `\uFEFF${APPLY_UPDATE_SCRIPT}`, 'utf8');
+  await fsp.writeFile(launcherScriptPath, `\uFEFF${UPDATE_LAUNCHER_SCRIPT}`, 'utf8');
+  const launcherLogFd = fs.openSync(launcherLogPath, 'a');
+  let child;
+  try {
+    child = spawnImpl(resolvePowerShellExecutable(process.env, existsSyncImpl), [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', launcherScriptPath
+    ], {
+      // A detached Windows PowerShell process can exit with code 0 without running
+      // -File. This attached broker uses Start-Process to create the independent
+      // worker; the worker must then prove it started by writing started.json.
+      detached: false,
+      windowsHide: true,
+      stdio: ['ignore', launcherLogFd, launcherLogFd],
+      env: {
+        ...process.env,
+        HAMSTER_UPDATE_APP_ROOT: prepared.applicationRoot,
+        HAMSTER_UPDATE_STAGE_ROOT: prepared.packageRoot,
+        HAMSTER_UPDATE_RUN_ROOT: prepared.runRoot,
+        HAMSTER_UPDATE_VALIDATION_FILE: validationFile,
+        HAMSTER_UPDATE_TARGET_PID: String(targetPid),
+        HAMSTER_UPDATE_VERSION: String(prepared.version)
+      }
+    });
+  } finally {
+    fs.closeSync(launcherLogFd);
+  }
+
+  try {
+    await waitForUpdaterStart(child, startedFile, {
+      timeoutMs: startupTimeoutMs,
+      intervalMs: startupPollIntervalMs,
+      existsImpl,
+      ...(delayImpl ? { delayImpl } : {})
+    });
+  } catch (error) {
+    if (child && child.exitCode === null) {
+      try { child.kill(); } catch {}
     }
-  });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    let launcherOutput = '';
+    try { launcherOutput = (await fsp.readFile(launcherLogPath, 'utf8')).trim().slice(-4_000); } catch {}
+    const wrapped = new Error([
+      `自动更新助手未能启动：${error.message}`,
+      launcherOutput ? `PowerShell 输出：${launcherOutput}` : '',
+      `诊断日志：${launcherLogPath}`
+    ].filter(Boolean).join('\n'));
+    wrapped.cause = error;
+    throw wrapped;
+  }
   child.unref();
-  return { validationFile, runRoot: prepared.runRoot };
+  return {
+    validationFile,
+    startedFile,
+    scriptPath,
+    launcherScriptPath,
+    launcherLogPath,
+    runRoot: prepared.runRoot,
+    updaterPid: child.pid
+  };
+}
+
+async function consumeUpdateFailure(userDataDirectory) {
+  const updatesRoot = path.join(path.resolve(userDataDirectory), 'updates');
+  let entries;
+  try { entries = await fsp.readdir(updatesRoot, { withFileTypes: true }); } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  const failures = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const runRoot = path.join(updatesRoot, entry.name);
+    const failurePath = path.join(runRoot, 'failed.json');
+    if (!(await exists(failurePath))) continue;
+    // Keep the original failure file for diagnostics. A rename is not reliable
+    // while PowerShell or antivirus software still has the file open; a durable
+    // marker prevents the same failure from being shown on every startup.
+    const notifiedPath = path.join(runRoot, 'failed.notified.json');
+    const noticeStatePath = path.join(runRoot, 'failed.notice-state.json');
+    if (await exists(notifiedPath) || await exists(noticeStatePath)) continue;
+    let failure;
+    try {
+      const raw = (await fsp.readFile(failurePath, 'utf8')).replace(/^\uFEFF/, '');
+      failure = JSON.parse(raw);
+    } catch (error) {
+      failure = {
+        version: entry.name,
+        error: `无法读取更新失败记录：${error.message}`,
+        failedAt: '',
+      };
+    }
+    const notification = { notifiedAt: new Date().toISOString(), version: failure.version || entry.name };
+    try {
+      // COPYFILE_EXCL makes this idempotent and does not require deleting or
+      // renaming the source file, so a locked failed.json is still safe.
+      await fsp.copyFile(failurePath, notifiedPath, fs.constants.COPYFILE_EXCL);
+    } catch (error) {
+      try {
+        await fsp.writeFile(noticeStatePath, JSON.stringify({ ...notification, error: error.message }), { encoding: 'utf8', flag: 'wx' });
+      } catch (markerError) {
+        // The notification is still returned this run. If both marker writes
+        // are blocked, the next startup may retry, but the failure is never lost.
+        failure.notificationPersistenceError = markerError.message;
+      }
+    }
+    failures.push({ ...failure, runRoot, logPath: path.join(runRoot, 'update.log') });
+  }
+  failures.sort((left, right) => String(right.failedAt).localeCompare(String(left.failedAt)));
+  return failures[0] || null;
 }
 
 async function cleanupSuccessfulUpdateRuns(userDataDirectory) {
@@ -225,5 +403,11 @@ module.exports = {
   hashFile,
   prepareUpdate,
   launchUpdate,
-  cleanupSuccessfulUpdateRuns
+  cleanupSuccessfulUpdateRuns,
+  consumeUpdateFailure,
+  manualUpdateInstructions,
+  resolvePowerShellExecutable,
+  waitForUpdaterStart,
+  APPLY_UPDATE_SCRIPT,
+  UPDATE_LAUNCHER_SCRIPT
 };

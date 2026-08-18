@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('archiveApp', {
   confirmTask: (jobId) => ipcRenderer.invoke('task:confirm', jobId),
   confirmAnomaly: (jobId) => ipcRenderer.invoke('task:confirm-anomaly', jobId),
   discardAnomaly: (jobId) => ipcRenderer.invoke('task:discard-anomaly', jobId),
+  acknowledgeTrashSafety: (jobId) => ipcRenderer.invoke('task:acknowledge-trash-safety', jobId),
   cancelTask: (jobId) => ipcRenderer.invoke('task:cancel', jobId),
   retryTask: (jobId) => ipcRenderer.invoke('task:retry', jobId),
   startQueue: () => ipcRenderer.invoke('queue:start'),

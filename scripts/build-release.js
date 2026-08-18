@@ -8,7 +8,7 @@ const { embedWindowsIcon } = require('./embed-windows-icon');
 
 const projectRoot = path.resolve(__dirname, '..');
 const electronDist = path.join(projectRoot, 'node_modules', 'electron', 'dist');
-const releaseName = `HamsterArchive-v${packageJson.version}-win-x64`;
+const releaseName = `HamsterArchiver-v${packageJson.version}-win-x64`;
 const outputRoot = path.join(projectRoot, 'dist', releaseName);
 
 async function exists(targetPath) {
@@ -34,9 +34,9 @@ async function main() {
   await fs.rm(outputRoot, { recursive: true, force: true });
   await fs.mkdir(path.dirname(outputRoot), { recursive: true });
   await fs.cp(electronDist, outputRoot, { recursive: true });
-  await fs.rename(path.join(outputRoot, 'electron.exe'), path.join(outputRoot, 'HamsterArchive.exe'));
+  await fs.rename(path.join(outputRoot, 'electron.exe'), path.join(outputRoot, 'HamsterArchiver.exe'));
   await embedWindowsIcon(
-    path.join(outputRoot, 'HamsterArchive.exe'),
+    path.join(outputRoot, 'HamsterArchiver.exe'),
     path.join(projectRoot, 'assets', 'app-icon.ico')
   );
   await fs.rm(path.join(outputRoot, 'resources', 'default_app.asar'), { force: true });
@@ -54,6 +54,9 @@ async function main() {
     await fs.copyFile(path.join(projectRoot, 'tools', 'ffmpeg', name), path.join(outputFfmpeg, name));
   }
   await fs.copyFile(path.join(projectRoot, 'README.md'), path.join(outputRoot, 'README.md'));
+  if (await exists(path.join(projectRoot, 'README.en.md'))) {
+    await fs.copyFile(path.join(projectRoot, 'README.en.md'), path.join(outputRoot, 'README.en.md'));
+  }
   const readmeAssets = path.join(projectRoot, 'README.assets');
   if (await exists(readmeAssets)) {
     await fs.cp(readmeAssets, path.join(outputRoot, 'README.assets'), { recursive: true });
@@ -61,7 +64,7 @@ async function main() {
   await fs.copyFile(path.join(projectRoot, 'LICENSE'), path.join(outputRoot, 'LICENSE'));
   await fs.writeFile(path.join(appDirectory, 'package.json'), `${JSON.stringify({
     name: packageJson.name,
-    productName: 'Hamster Archive',
+    productName: 'Hamster Archiver',
     version: packageJson.version,
     description: packageJson.description,
     main: 'src/main.js',
@@ -73,7 +76,7 @@ async function main() {
     await fs.mkdir(path.join(userDataDirectory, directory), { recursive: true });
   }
   await fs.writeFile(path.join(userDataDirectory, 'README.txt'), [
-    'Hamster Archive 便携式用户数据目录',
+    'Hamster Archiver portable user data directory',
     '',
     '设置、仓库、缩略图、日志和默认 processed 都保存在这里。',
     '压缩暂存目录会在“打包后文件存放点”旁自动建立，不在 userdata 中。',

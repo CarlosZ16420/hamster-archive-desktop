@@ -22,11 +22,14 @@ const { checkForUpdates } = require('./core/update-checker');
 const {
   prepareUpdate,
   launchUpdate,
-  cleanupSuccessfulUpdateRuns
+  cleanupSuccessfulUpdateRuns,
+  consumeUpdateFailure,
+  manualUpdateInstructions
 } = require('./core/update-manager');
 const { findTrashItems, isTrashItemPresent, restoreTrashItem } = require('./core/recycle-bin');
 
 const appIconPath = path.join(__dirname, '..', 'assets', 'app-icon.png');
+const releasesUrl = 'https://github.com/CarlosZ16420/hamster-archiver/releases';
 
 let mainWindow;
 let queueManager;
@@ -34,8 +37,6 @@ let appStore;
 let allowWindowClose = false;
 let closePromptOpen = false;
 let scheduleTimer = null;
-let sourceAuditTimer = null;
-let sourceAuditStartupTimer = null;
 let lastCatalogPushSignature = '';
 const isSmokeTest = process.env.HAMSTER_SMOKE_TEST === '1';
 if (isSmokeTest) {
@@ -60,7 +61,7 @@ if (isSmokeTest) {
   app.commandLine.appendSwitch('disable-gpu-compositing');
 }
 const hasSingleInstanceLock = isSmokeTest || app.requestSingleInstanceLock();
-app.setAppUserModelId('com.carlosz.hamsterarchive');
+app.setAppUserModelId('com.carlosz.hamsterarchiver');
 
 function catalogPushSignature(catalog) {
   return JSON.stringify((catalog || []).map((record) => [
@@ -204,6 +205,33 @@ async function openItemLocation(targetPath, label = '文件位置') {
   return resolvedPath;
 }
 
+async function showUpdateFailureDialog({ error, releaseUrl = releasesUrl, runRoot = '' }) {
+  const english = queueManager?.config?.language === 'en-US';
+  const buttons = [english ? 'Open Releases' : '打开发布页'];
+  if (runRoot) buttons.push(english ? 'Open diagnostics' : '打开诊断目录');
+  buttons.push(english ? 'Stay on this version' : '留在当前版本');
+  const response = await dialog.showMessageBox(mainWindow, {
+    type: 'error',
+    title: english ? 'Automatic update did not finish' : '自动更新未完成',
+    message: english
+      ? 'Program files were not replaced. The current version remains usable.'
+      : '程序文件没有被替换，当前版本仍可继续使用。',
+    detail: english
+      ? `Reason: ${error || 'The updater returned no usable result.'}\n\nManual update:\n${manualUpdateInstructions('en-US')}`
+      : `失败原因：${error || '更新助手没有返回可用结果。'}\n\n手动更新方法：\n${manualUpdateInstructions()}`,
+    buttons,
+    defaultId: 0,
+    cancelId: buttons.length - 1,
+    noLink: true
+  });
+  if (response.response === 0) await shell.openExternal(releaseUrl);
+  else if (runRoot && response.response === 1) {
+    await fs.mkdir(runRoot, { recursive: true });
+    const openError = await shell.openPath(runRoot);
+    if (openError) dialog.showErrorBox(english ? 'Could not open diagnostics' : '无法打开诊断目录', openError);
+  }
+}
+
 function assertTrustedSender(event) {
   const senderUrl = event.senderFrame?.url || '';
   if (!senderUrl.startsWith('file://')) {
@@ -220,7 +248,7 @@ function createWindow() {
     minHeight: 680,
     title: '仓鼠症大结局',
     icon: appIconPath,
-    backgroundColor: '#f3efe7',
+    backgroundColor: '#f7f7f8',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -263,7 +291,7 @@ function createWindow() {
       const bridgeStatus = await mainWindow.webContents.executeJavaScript(`(() => {
         const required = [
           'getState', 'chooseDirectory', 'chooseProgram', 'changeWarehouseLocation', 'openWarehouse', 'exportWarehouse', 'importWarehouse', 'checkForUpdates', 'openUserData', 'openExternal', 'copyText', 'chooseSingle', 'saveConfig', 'scanSource',
-          'addSingle', 'openTaskSource', 'getDroppedPath', 'confirmTask', 'confirmAnomaly', 'cancelTask', 'retryTask', 'startQueue',
+          'addSingle', 'openTaskSource', 'getDroppedPath', 'confirmTask', 'confirmAnomaly', 'acknowledgeTrashSafety', 'cancelTask', 'retryTask', 'startQueue',
           'discardAnomaly', 'pauseQueue', 'resumeQueue', 'removeJobs', 'clearCompletedJobs', 'clearQueue', 'clearPotentialDuplicates', 'confirmAllDuplicates', 'finishNextAndPause', 'searchCatalog',
           'getCatalogSuggestions', 'openSimilarityIgnoreTerms', 'reloadSimilarityIgnoreTerms',
           'getWarehouseInsights', 'getRandomCatalogRecord',
@@ -366,8 +394,8 @@ function createWindow() {
             if (${process.env.HAMSTER_README_DEMO === '1'}) {
               const warehousePath = document.querySelector('#warehouse-path');
               if (warehousePath) {
-                warehousePath.textContent = '仓库：D:\\\\HamsterArchive\\\\userdata\\\\warehouse';
-                warehousePath.title = 'D:\\\\HamsterArchive\\\\userdata\\\\warehouse';
+        warehousePath.textContent = '仓库：D:\\\\HamsterArchiver\\\\userdata\\\\warehouse';
+        warehousePath.title = 'D:\\\\HamsterArchiver\\\\userdata\\\\warehouse';
               }
             }
             const overview = document.querySelector('.warehouse-overview');
@@ -496,11 +524,11 @@ function createWindow() {
         if (process.env.HAMSTER_README_DEMO === '1') {
           await mainWindow.webContents.executeJavaScript(`(() => {
             const intakePath = document.querySelector('#intake-directory');
-            if (intakePath) intakePath.value = 'D:\\\\HamsterArchive\\\\incoming';
+            if (intakePath) intakePath.value = 'D:\\\\HamsterArchiver\\\\incoming';
             for (const row of document.querySelectorAll('#task-list tr')) {
               const name = row.querySelector('.task-name strong')?.textContent || 'project';
               const sourcePath = row.querySelector('.task-name small');
-              if (sourcePath) sourcePath.textContent = 'D:\\\\HamsterArchive\\\\incoming\\\\' + name;
+            if (sourcePath) sourcePath.textContent = 'D:\\\\HamsterArchiver\\\\incoming\\\\' + name;
             }
           })()`);
         }
@@ -513,7 +541,7 @@ function createWindow() {
             }
             if (${process.env.HAMSTER_README_DEMO === '1'}) {
               const userDataPath = document.querySelector('#user-data-path');
-              if (userDataPath) userDataPath.value = 'D:\\\\HamsterArchive\\\\userdata';
+            if (userDataPath) userDataPath.value = 'D:\\\\HamsterArchiver\\\\userdata';
             }
           `);
         }
@@ -679,7 +707,7 @@ function registerIpc() {
     const restart = await dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: '更新包已准备好',
-      message: `Hamster Archive ${result.latestVersion} 已下载并校验完成。`,
+      message: `Hamster Archiver ${result.latestVersion} 已下载并校验完成。`,
       detail: '点击“立即重启”后，程序会退出、替换程序文件并自动启动新版本。userdata、仓库和压缩包不会被覆盖。',
       buttons: ['立即重启', '稍后'],
       defaultId: 0,
@@ -687,7 +715,13 @@ function registerIpc() {
       noLink: true
     });
     if (restart.response !== 0) return { ...result, staged: true };
-    await launchUpdate({ prepared, targetPid: process.pid });
+    try {
+      await launchUpdate({ prepared, targetPid: process.pid });
+    } catch (error) {
+      console.error(`UPDATE_LAUNCH_FAILED ${error.stack || error.message}`);
+      await showUpdateFailureDialog({ error: error.message, releaseUrl: result.releaseUrl, runRoot: prepared.runRoot });
+      return { ...result, staged: true, launchFailed: true, error: error.message };
+    }
     allowWindowClose = true;
     app.quit();
     return result;
@@ -781,6 +815,11 @@ function registerIpc() {
   ipcMain.handle('task:discard-anomaly', async (event, jobId) => {
     assertTrustedSender(event);
     return queueManager.discardAnomalousArchive(jobId);
+  });
+
+  ipcMain.handle('task:acknowledge-trash-safety', async (event, jobId) => {
+    assertTrustedSender(event);
+    return queueManager.acknowledgeTrashSafetyHalt(jobId);
   });
 
   ipcMain.handle('task:cancel', async (event, jobId) => {
@@ -992,6 +1031,10 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     resolveProgramPath: (configuredPath) => resolveApplicationPath(workspaceRoot, configuredPath)
   });
   await queueManager.initialize();
+  const pendingUpdateFailure = await consumeUpdateFailure(userDataLayout.root).catch((error) => {
+    console.warn(`UPDATE_FAILURE_READ_WARNING ${error.message}`);
+    return null;
+  });
   await cleanupSuccessfulUpdateRuns(userDataLayout.root).catch((error) => {
     console.warn(`UPDATE_CLEANUP_WARNING ${error.message}`);
   });
@@ -1045,16 +1088,6 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     void queueManager.handleScheduleTick().catch((error) => console.error('SCHEDULE_ERROR', error));
   }, 15_000);
   scheduleTimer.unref?.();
-  sourceAuditStartupTimer = setTimeout(() => {
-    void queueManager.auditTrackedSourceLocations()
-      .catch((error) => console.error('SOURCE_AUDIT_ERROR', error));
-  }, 5_000);
-  sourceAuditStartupTimer.unref?.();
-  sourceAuditTimer = setInterval(() => {
-    void queueManager.auditTrackedSourceLocations()
-      .catch((error) => console.error('SOURCE_AUDIT_ERROR', error));
-  }, 30 * 60_000);
-  sourceAuditTimer.unref?.();
   if (process.env.HAMSTER_TRASH_TEST_DIR) {
     const trashTestDir = path.resolve(process.env.HAMSTER_TRASH_TEST_DIR);
     if (!path.basename(trashTestDir).startsWith('hamster-trash-smoke-')) {
@@ -1175,13 +1208,21 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   }
   if (process.env.HAMSTER_README_DEMO === '1') {
     Object.assign(queueManager.config, {
-      archiveOutputDirectory: 'D:\\HamsterArchive\\packed',
-      archiveStagingDirectory: 'D:\\HamsterArchive\\packed-staging',
-      processedSourceDirectory: 'D:\\HamsterArchive\\userdata\\processed'
+      archiveOutputDirectory: 'D:\\HamsterArchiver\\packed',
+      archiveStagingDirectory: 'D:\\HamsterArchiver\\packed-staging',
+      processedSourceDirectory: 'D:\\HamsterArchiver\\userdata\\processed'
     });
   }
   registerIpc();
   createWindow();
+  if (pendingUpdateFailure && !isSmokeTest) {
+    setImmediate(() => {
+      void showUpdateFailureDialog({
+        error: pendingUpdateFailure.error,
+        runRoot: pendingUpdateFailure.runRoot
+      }).catch((error) => console.error(`UPDATE_FAILURE_DIALOG_WARNING ${error.message}`));
+    });
+  }
 
   lastCatalogPushSignature = catalogPushSignature(queueManager.getState().catalog);
   queueManager.on('state', (state) => {
@@ -1226,7 +1267,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   if (scheduleTimer) clearInterval(scheduleTimer);
-  if (sourceAuditTimer) clearInterval(sourceAuditTimer);
-  if (sourceAuditStartupTimer) clearTimeout(sourceAuditStartupTimer);
   appStore?.closeAll();
 });

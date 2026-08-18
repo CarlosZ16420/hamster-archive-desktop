@@ -103,6 +103,7 @@ function makeDefaultConfig(workspaceRoot, userDataLayout = {}) {
   const userDataRoot = userDataLayout.root || path.join(workspaceRoot, 'userdata');
   return {
     storageSchemaVersion: 3,
+    language: 'zh-CN',
     userDataDirectory: userDataRoot,
     intakeDirectory: '',
     archiveStagingDirectory: '',

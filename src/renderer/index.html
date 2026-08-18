@@ -5,27 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/png" href="../../assets/app-icon.png">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; media-src 'self' file:">
-  <title>仓鼠症大结局</title>
+  <title>Hamster Archiver</title>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body data-theme="day">
   <div id="desktop-required" class="desktop-required" hidden>
     <div>
       <h1>请从桌面程序启动</h1>
       <p>这个页面需要本地文件与 7-Zip 权限，不能作为普通网页单独打开。</p>
-      <p>请关闭当前页面，然后运行项目根目录中的 HamsterArchive.exe。</p>
+      <p>请关闭当前页面，然后运行项目根目录中的 HamsterArchiver.exe。</p>
     </div>
   </div>
 
   <header class="hero">
     <div>
-      <p class="eyebrow">Hamster Archive</p>
+      <p class="eyebrow">Hamster Archiver</p>
       <h1>仓鼠症大结局</h1>
       <p class="subtitle">把混乱的文件，变成可视化仓库和规整压缩包，再交给云盘。</p>
     </div>
     <div class="hero-actions">
       <div id="source-safety-chip" class="safety-chip"><span></span>完成后保留原文件</div>
-      <label class="theme-picker" for="theme-mode"><span>主题</span><select id="theme-mode" aria-label="选择界面主题"><option value="day">白昼</option><option value="night">黑夜</option></select></label>
+      <label class="theme-picker" for="theme-mode"><span>主题</span><select id="theme-mode" aria-label="选择界面主题"><option value="classic">经典</option><option value="day" selected>白昼</option><option value="night">黑夜</option></select></label>
+      <button id="language-toggle" class="language-toggle" type="button" aria-label="切换到 English"><span class="language-toggle-icon" aria-hidden="true">⇄</span><span id="language-toggle-label">EN</span></button>
     </div>
   </header>
 
@@ -377,7 +378,7 @@
   </main>
 
   <footer class="app-footer">
-    <span>Hamster Archive · 本地优先的归档工具</span>
+    <span>Hamster Archiver · 本地优先的归档工具</span>
     <span class="app-footer-links">
       <button class="footer-link" type="button" data-external-url="https://github.com/CarlosZ16420/hamster-archiver">GitHub 仓库</button>
       <i aria-hidden="true">·</i>
@@ -486,7 +487,18 @@
     <div class="dialog-actions"><button id="confirm-usage-guide" class="button primary" type="button">知道了</button></div>
   </dialog>
 
+  <dialog id="trash-safety-dialog" class="manual-dialog compact-dialog trash-safety-dialog">
+    <div class="dialog-heading"><div><p class="step">安全熔断 / SAFETY HALT</p><h2>队列已立即停止</h2></div></div>
+    <p id="trash-safety-message" class="dialog-help"></p>
+    <div class="trash-safety-guidance">
+      <strong>自动移入回收站已经关闭</strong>
+      <p>后续任务尚未启动。请先检查 Windows 回收站和原文件位置，再决定是否重新开始队列。</p>
+    </div>
+    <div class="dialog-actions"><button id="acknowledge-trash-safety" class="button danger" type="button">我已了解，保持队列停止</button></div>
+  </dialog>
+
   <div id="toast" class="toast" hidden></div>
+  <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

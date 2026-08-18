@@ -43,4 +43,5 @@ ReadmeGlmversion.md
 
 # 构建/发布产物：源码仓库不直接保存大二进制
 HamsterArchive.exe
+HamsterArchiver.exe
 tools/ffmpeg/*.exe

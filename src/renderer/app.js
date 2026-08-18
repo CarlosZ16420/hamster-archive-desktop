@@ -2,8 +2,11 @@
 
 if (!window.archiveApp) {
   document.querySelector('#desktop-required').hidden = false;
-  throw new Error('桌面桥接未加载：请使用 HamsterArchive.exe，不要直接打开网页文件。');
+  throw new Error('桌面桥接未加载：请运行 HamsterArchiver.exe，不要直接打开网页文件。');
 }
+
+const i18n = window.hamsterI18n;
+const t = (value) => i18n?.translate(value) ?? value;
 
 const elements = {
   intakeDirectory: document.querySelector('#intake-directory'),
@@ -30,6 +33,8 @@ const elements = {
   scheduleStart: document.querySelector('#schedule-start'),
   scheduleEnd: document.querySelector('#schedule-end'),
   safetyChip: document.querySelector('#source-safety-chip'),
+  languageToggle: document.querySelector('#language-toggle'),
+  languageToggleLabel: document.querySelector('#language-toggle-label'),
   notice: document.querySelector('#notice'),
   taskList: document.querySelector('#task-list'),
   taskListContainer: document.querySelector('#task-list-container'),
@@ -96,6 +101,9 @@ const elements = {
   setThumbnailCover: document.querySelector('#set-thumbnail-cover'),
   deleteThumbnail: document.querySelector('#delete-thumbnail'),
   runningIndicator: document.querySelector('#running-indicator'),
+  trashSafetyDialog: document.querySelector('#trash-safety-dialog'),
+  trashSafetyMessage: document.querySelector('#trash-safety-message'),
+  acknowledgeTrashSafety: document.querySelector('#acknowledge-trash-safety'),
   toast: document.querySelector('#toast')
 };
 
@@ -103,6 +111,7 @@ const statusLabels = {
   awaiting_confirmation: '等待确认',
   awaiting_duplicate_confirmation: '重复待确认',
   awaiting_anomaly_confirmation: '大小异常待核验',
+  awaiting_trash_safety_confirmation: '回收站安全警告',
   queued: '等待压缩',
   inventorying: '生成清单与 MD5',
   compressing: '压缩中',
@@ -113,6 +122,10 @@ const statusLabels = {
   failed: '失败',
   cancelled: '已取消'
 };
+
+function statusLabel(status) {
+  return statusLabels[status] || status;
+}
 
 let currentState = null;
 let activeCatalogId = null;
@@ -126,6 +139,11 @@ let lightboxContext = null;
 let taskListCollapsed = false;
 let catalogPage = 1;
 const CATALOG_PAGE_SIZE = 24;
+const CATALOG_GRID_MIN_CARD = 230;
+const CATALOG_GRID_GAP = 16;
+const CATALOG_GRID_ROWS_PER_PAGE = 4;
+let catalogGridColumns = 4;
+let catalogResizeTimer = 0;
 let catalogRefreshDirty = false;
 let lastCatalogRefreshAt = 0;
 let catalogSearchSequence = 0;
@@ -139,14 +157,30 @@ const selectedJobIds = new Set();
 const selectedCatalogIds = new Set();
 
 const themeMode = document.querySelector('#theme-mode');
+const THEME_VALUES = ['classic', 'day', 'night'];
 function applyTheme(theme) {
-  const nextTheme = theme === 'night' ? 'night' : 'day';
+  const nextTheme = THEME_VALUES.includes(theme) ? theme : 'day';
   document.body.dataset.theme = nextTheme;
   if (themeMode) themeMode.value = nextTheme;
   localStorage.setItem('hamster-theme', nextTheme);
 }
 applyTheme(localStorage.getItem('hamster-theme') || 'day');
 themeMode?.addEventListener('change', () => applyTheme(themeMode.value));
+function updateLanguageToggle(locale = i18n?.getLocale?.() || 'zh-CN') {
+  const english = locale === 'en-US';
+  if (elements.languageToggleLabel) elements.languageToggleLabel.textContent = english ? '中文' : 'EN';
+  if (elements.languageToggle) {
+    const label = english ? '切换到中文' : '切换到 English';
+    elements.languageToggle.setAttribute('aria-label', t(label));
+    elements.languageToggle.title = t(label);
+  }
+}
+elements.languageToggle?.addEventListener('click', () => {
+  const nextLocale = i18n?.getLocale?.() === 'en-US' ? 'zh-CN' : 'en-US';
+  i18n?.setLocale(nextLocale);
+  updateLanguageToggle(nextLocale);
+  void saveConfig();
+});
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
@@ -191,7 +225,9 @@ function queueEstimateText(activeJob, percentage = activeJob.progress || 0) {
 }
 
 function taskProgressText(job, percentage = job.progress || 0) {
-  const base = job.stageText || `${statusLabels[job.status] || job.status} · ${Math.round(percentage)}%`;
+  const base = job.stageText
+    ? (i18n?.translateStage?.(job.stageText) || t(job.stageText))
+    : `${t(statusLabel(job.status))} · ${Math.round(percentage)}%`;
   const estimate = queueEstimateText(job, percentage);
   return estimate ? `${base} · ${estimate}` : base;
 }
@@ -219,10 +255,14 @@ function videoInfoText(file) {
 
 function showToast(message, isError = false) {
   clearTimeout(toastTimer);
-  elements.toast.textContent = message;
+  elements.toast.textContent = t(message);
   elements.toast.classList.toggle('error', isError);
   elements.toast.hidden = false;
   toastTimer = setTimeout(() => { elements.toast.hidden = true; }, 4500);
+}
+
+function confirmUser(message) {
+  return window.confirm(t(message));
 }
 
 async function safely(action) {
@@ -237,7 +277,12 @@ async function safely(action) {
 function make(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) {
+    // Keep the source-language text on the node before translating it. This lets
+    // a later switch back to Chinese restore dynamically created content too.
+    node.textContent = text;
+    i18n?.translateDom(node);
+  }
   return node;
 }
 
@@ -255,8 +300,8 @@ function formatCatalogDate(value) {
     return `${String(value).replaceAll('-', '/')}（旧记录，仅日期）`;
   }
   const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return '日期未知';
-  return date.toLocaleString('zh-CN', {
+  if (!Number.isFinite(date.getTime())) return t('日期未知');
+  return date.toLocaleString(i18n?.getLocale?.() === 'en-US' ? 'en-US' : 'zh-CN', {
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false
   });
 }
@@ -264,7 +309,7 @@ function formatCatalogDate(value) {
 function formatDecimalGb(bytes) {
   const value = (Number(bytes) || 0) / 1_000_000_000;
   if (value === 0) return '0';
-  if (value >= 1000) return value.toLocaleString('zh-CN', { maximumFractionDigits: 0 });
+  if (value >= 1000) return value.toLocaleString(i18n?.getLocale?.() === 'en-US' ? 'en-US' : 'zh-CN', { maximumFractionDigits: 0 });
   if (value >= 100) return value.toFixed(0);
   return value.toFixed(1).replace(/\.0$/, '');
 }
@@ -291,12 +336,12 @@ function renderWarehouseInsights(insights) {
     const cell = make('span', 'activity-cell');
     const level = activityLevel(entry);
     cell.dataset.level = String(level);
-    const dateLabel = new Date(`${entry.date}T12:00:00`).toLocaleDateString('zh-CN', {
+    const dateLabel = new Date(`${entry.date}T12:00:00`).toLocaleDateString(i18n?.getLocale?.() === 'en-US' ? 'en-US' : 'zh-CN', {
       year: 'numeric', month: 'long', day: 'numeric', weekday: 'short'
     });
     cell.title = entry.future
-      ? `${dateLabel} · 尚未到达`
-      : `${dateLabel} · ${entry.inventoryCount} 项库存 · ${formatDecimalGb(entry.originalBytes)} GB`;
+      ? t(`${dateLabel} · 尚未到达`)
+      : t(`${dateLabel} · ${entry.inventoryCount} 项库存 · ${formatDecimalGb(entry.originalBytes)} GB`);
     elements.activityGrid.append(cell);
   }
 
@@ -306,7 +351,9 @@ function renderWarehouseInsights(insights) {
     const entry = insights.activity[week * 7];
     const date = new Date(`${entry.date}T12:00:00`);
     const month = date.getMonth();
-    const label = make('span', '', month !== previousMonth ? `${month + 1}月` : '');
+    const label = make('span', '', month !== previousMonth
+      ? (i18n?.getLocale?.() === 'en-US' ? date.toLocaleDateString('en-US', { month: 'short' }) : `${month + 1}月`)
+      : '');
     elements.activityMonths.append(label);
     previousMonth = month;
   }
@@ -397,6 +444,7 @@ async function showRandomWalk(shouldScroll = true) {
 
 function readConfig() {
   return {
+    language: i18n?.getLocale?.() === 'en-US' ? 'en-US' : 'zh-CN',
     intakeDirectory: elements.intakeDirectory.value.trim(),
     archiveStagingDirectory: deriveStagingDirectory(elements.archiveOutputDirectory.value),
     archiveOutputDirectory: elements.archiveOutputDirectory.value.trim(),
@@ -453,11 +501,13 @@ function updateNamingControls() {
 }
 
 function renderConfig(config) {
+  i18n?.setLocale(config.language || 'zh-CN');
+  updateLanguageToggle(config.language === 'en-US' ? 'en-US' : 'zh-CN');
   elements.intakeDirectory.value = config.intakeDirectory || '';
   elements.archiveOutputDirectory.value = config.archiveOutputDirectory || '';
   elements.archiveStagingDirectory.value = deriveStagingDirectory(config.archiveOutputDirectory);
-  elements.warehousePath.textContent = config.repositoryDirectory ? `仓库：${config.repositoryDirectory}` : '';
-  elements.warehousePath.title = config.repositoryDirectory || '当前仓库位置';
+  elements.warehousePath.textContent = config.repositoryDirectory ? t(`仓库：${config.repositoryDirectory}`) : '';
+  elements.warehousePath.title = config.repositoryDirectory || t('当前仓库位置');
   elements.userDataPath.value = config.userDataDirectory || '';
   elements.userDataPath.title = config.userDataDirectory || '';
   elements.moveCompleted.checked = Boolean(config.moveCompleted);
@@ -471,7 +521,7 @@ function renderConfig(config) {
   elements.recordArchivePassword.checked = config.recordArchivePassword !== false;
   elements.thumbnailLimit.value = String(config.thumbnailLimit || 30);
   elements.password.type = 'password';
-  document.querySelector('#toggle-password').textContent = '显示';
+  document.querySelector('#toggle-password').textContent = t('显示');
   elements.videoFrameBackup.checked = config.videoFrameBackup !== false;
   elements.videoFrameCount.value = String(config.videoFrameCount || 3);
   elements.smallItemFilter.checked = config.smallItemFilter !== false;
@@ -492,8 +542,8 @@ function renderConfig(config) {
 function renderSafetyChip(autoTrash, moveCompleted = false) {
   elements.safetyChip.classList.toggle('trash-enabled', autoTrash);
   elements.safetyChip.lastChild.textContent = autoTrash
-    ? '归档完成后移入回收站'
-    : moveCompleted ? '归档完成后移到指定位置' : '完成后保留源文件';
+    ? t('归档完成后移入回收站')
+    : moveCompleted ? t('归档完成后移到指定位置') : t('完成后保留原文件');
 }
 
 function actionButton(label, action, jobId, className = '') {
@@ -508,9 +558,9 @@ function updateSelectionControls(jobs) {
   for (const id of [...selectedJobIds]) {
     if (!validIds.has(id)) selectedJobIds.delete(id);
   }
-  elements.selectionCount.textContent = selectedJobIds.size > 0
+  elements.selectionCount.textContent = t(selectedJobIds.size > 0
     ? `已选择 ${selectedJobIds.size} 项（按住 Ctrl 可多选）`
-    : '未选择任务（按住 Ctrl 可多选）';
+    : '未选择任务（按住 Ctrl 可多选）');
   elements.removeSelected.disabled = selectedJobIds.size === 0;
   elements.selectAllTasks.checked = jobs.length > 0 && selectedJobIds.size === jobs.length;
   elements.selectAllTasks.indeterminate = selectedJobIds.size > 0 && selectedJobIds.size < jobs.length;
@@ -552,7 +602,7 @@ function renderJobs(jobs) {
     row.append(make('td', '', formatBytes(job.totalBytes)));
 
     const statusCell = document.createElement('td');
-    statusCell.append(make('span', `status ${job.status}`, statusLabels[job.status] || job.status));
+    statusCell.append(make('span', `status ${job.status}`, statusLabel(job.status)));
     row.append(statusCell);
 
     const progressCell = document.createElement('td');
@@ -585,6 +635,9 @@ function renderJobs(jobs) {
         actionButton('核验后确认入库', 'confirm-anomaly', job.id, 'confirm'),
         actionButton('删除异常成品', 'discard-anomaly', job.id, 'danger-link')
       );
+    }
+    if (job.status === 'awaiting_trash_safety_confirmation') {
+      actionCell.append(actionButton('确认安全警告', 'acknowledge-trash-safety', job.id, 'danger-link'));
     }
     if (['queued', 'awaiting_confirmation', 'awaiting_duplicate_confirmation', 'inventorying', 'compressing', 'verifying', 'failed'].includes(job.status)) {
       actionCell.append(actionButton('取消', 'cancel', job.id));
@@ -622,14 +675,44 @@ function updateCatalogSelectionControls() {
   }
   const resultIds = currentCatalogResults.map((record) => record.id);
   const selectedResultCount = resultIds.filter((id) => selectedCatalogIds.has(id)).length;
-  elements.catalogSelectionCount.textContent = selectedCatalogIds.size > 0
+  elements.catalogSelectionCount.textContent = t(selectedCatalogIds.size > 0
     ? `已选择 ${selectedCatalogIds.size} 项`
-    : '未选择仓库内容';
+    : '未选择仓库内容');
   elements.addTagsSelected.disabled = selectedCatalogIds.size === 0;
   elements.updateBackupSelected.disabled = selectedCatalogIds.size === 0;
   elements.deleteCatalogSelected.disabled = selectedCatalogIds.size === 0;
   elements.selectAllCatalog.checked = resultIds.length > 0 && selectedResultCount === resultIds.length;
   elements.selectAllCatalog.indeterminate = selectedResultCount > 0 && selectedResultCount < resultIds.length;
+}
+
+function measureCatalogGridColumns() {
+  if (catalogViewMode !== 'grid') return 1;
+  let width = elements.catalogList.clientWidth;
+  if (!width) width = Math.max(0, window.innerWidth - 210);
+  if (!width) return catalogGridColumns;
+  return Math.max(1, Math.floor((width + CATALOG_GRID_GAP) / (CATALOG_GRID_MIN_CARD + CATALOG_GRID_GAP)));
+}
+
+function catalogPageSize() {
+  if (catalogViewMode !== 'grid') return CATALOG_PAGE_SIZE;
+  return Math.max(6, catalogGridColumns * CATALOG_GRID_ROWS_PER_PAGE);
+}
+
+function stretchOrphanCatalogCards() {
+  if (catalogViewMode !== 'grid') return;
+  const cards = elements.catalogList.querySelectorAll('.catalog-card');
+  if (cards.length === 0) return;
+  const columns = catalogGridColumns;
+  if (columns <= 1) return;
+  const orphans = cards.length % columns;
+  if (orphans === 0) return;
+  const baseSpan = Math.floor(columns / orphans);
+  const extraSpan = columns % orphans;
+  const orphanCards = Array.from(cards).slice(-orphans);
+  orphanCards.forEach((card, index) => {
+    const span = baseSpan + (index < extraSpan ? 1 : 0);
+    card.style.gridColumn = span > 1 ? `span ${span}` : '';
+  });
 }
 
 function renderCatalog(catalog) {
@@ -641,12 +724,14 @@ function renderCatalog(catalog) {
     elements.catalogList.append(make('p', 'muted catalog-empty', '没有符合当前条件的仓库内容'));
     return;
   }
+  catalogGridColumns = measureCatalogGridColumns();
+  const pageSize = catalogPageSize();
   const ordered = [...catalog];
-  const pageCount = Math.max(1, Math.ceil(ordered.length / CATALOG_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(ordered.length / pageSize));
   catalogPage = Math.min(Math.max(1, catalogPage), pageCount);
-  const visibleRecords = ordered.slice((catalogPage - 1) * CATALOG_PAGE_SIZE, catalogPage * CATALOG_PAGE_SIZE);
+  const visibleRecords = ordered.slice((catalogPage - 1) * pageSize, catalogPage * pageSize);
   elements.catalogPagination.hidden = pageCount <= 1;
-  elements.catalogPageStatus.textContent = `第 ${catalogPage} / ${pageCount} 页 · 共 ${catalog.length} 项`;
+  elements.catalogPageStatus.textContent = t(`第 ${catalogPage} / ${pageCount} 页 · 共 ${catalog.length} 项`);
   elements.catalogPagePrev.disabled = catalogPage <= 1;
   elements.catalogPageNext.disabled = catalogPage >= pageCount;
   for (const record of visibleRecords) {
@@ -703,6 +788,7 @@ function renderCatalog(catalog) {
     card.append(checkbox, button);
     elements.catalogList.append(card);
   }
+  stretchOrphanCatalogCards();
 }
 
 function updateTagFilterOptions(catalog) {
@@ -918,13 +1004,13 @@ async function openThumbnailLightbox(recordId, relativePath, title) {
   }
   lightboxContext = { recordId, relativePath, title };
   elements.lightboxImage.src = dataUrl;
-  elements.lightboxTitle.textContent = title || '媒体预览';
+  elements.lightboxTitle.textContent = title || t('媒体预览');
   elements.lightboxPath.textContent = relativePath;
   const summary = (currentState?.catalog || []).find((record) => record.id === recordId);
   const isCurrentCover = summary?.coverThumbnailRef === relativePath ||
     (!summary?.coverThumbnailRef && summary?.coverRelativePath === relativePath);
   elements.setThumbnailCover.disabled = isCurrentCover;
-  elements.setThumbnailCover.textContent = isCurrentCover ? '当前项目封面' : '设为项目封面';
+  elements.setThumbnailCover.textContent = t(isCurrentCover ? '当前项目封面' : '设为项目封面');
   elements.thumbnailLightbox.showModal();
 }
 
@@ -936,36 +1022,67 @@ function closeThumbnailLightbox() {
 
 function flattenDirectoryTree(root) {
   const rows = [];
-  const visit = (node, depth) => {
-    rows.push({ type: 'directory', depth, name: node.name, count: node.files.length + node.directories.size });
-    for (const child of [...node.directories.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))) visit(child, depth + 1);
+  const visit = (node, depth, parentKey) => {
+    const key = `${parentKey}/${node.name}`;
+    const count = node.files.length + node.directories.size;
+    rows.push({ type: 'directory', depth, name: node.name, count, key, hasChildren: count > 0 });
+    for (const child of [...node.directories.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))) visit(child, depth + 1, key);
     for (const file of [...node.files].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))) rows.push({ type: 'file', depth: depth + 1, file });
   };
-  for (const directory of [...root.directories.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))) visit(directory, 0);
+  for (const directory of [...root.directories.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))) visit(directory, 0, '');
   for (const file of [...root.files].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))) rows.push({ type: 'file', depth: 0, file });
   return rows;
 }
 
 function renderVirtualDirectoryTree(root) {
-  const rows = flattenDirectoryTree(root);
-  if (rows.length === 0) return make('p', 'muted', '这个归档中没有文件。');
+  const allRows = flattenDirectoryTree(root);
+  if (allRows.length === 0) return make('p', 'muted', '这个归档中没有文件。');
+  const collapsed = new Set();
+  for (const row of allRows) {
+    if (row.type === 'directory' && row.hasChildren && row.depth >= 2) collapsed.add(row.key);
+  }
+  const visibleRows = () => {
+    const visible = [];
+    let skipDepth = null;
+    for (const row of allRows) {
+      if (skipDepth !== null) {
+        if (row.depth > skipDepth) continue;
+        skipDepth = null;
+      }
+      visible.push(row);
+      if (row.type === 'directory' && collapsed.has(row.key)) skipDepth = row.depth;
+    }
+    return visible;
+  };
   const viewport = make('div', 'virtual-directory-tree');
   const canvas = make('div', 'virtual-directory-canvas');
   const rowHeight = 48;
-  canvas.style.height = `${rows.length * rowHeight}px`;
   viewport.append(canvas);
+  let rows = visibleRows();
   const paint = () => {
+    rows = visibleRows();
+    canvas.style.height = `${rows.length * rowHeight}px`;
+    const maxScrollTop = Math.max(0, rows.length * rowHeight - viewport.clientHeight);
+    if (viewport.scrollTop > maxScrollTop) viewport.scrollTop = maxScrollTop;
     const first = Math.max(0, Math.floor(viewport.scrollTop / rowHeight) - 6);
     const count = Math.ceil(viewport.clientHeight / rowHeight) + 12;
     const last = Math.min(rows.length, first + count);
     const fragment = document.createDocumentFragment();
     for (let index = first; index < last; index += 1) {
       const item = rows[index];
-      const row = make('div', `virtual-tree-row ${item.type}`);
+      const row = make('div', `virtual-tree-row ${item.type}${item.type === 'directory' && item.hasChildren ? ' collapsible' : ''}`);
       row.style.top = `${index * rowHeight}px`;
       row.style.paddingLeft = `${12 + item.depth * 18}px`;
       if (item.type === 'directory') {
-        row.append(make('span', 'virtual-tree-icon', '▸'), make('strong', '', item.name), make('small', '', `${item.count} 项`));
+        const isCollapsed = collapsed.has(item.key);
+        row.setAttribute('aria-expanded', item.hasChildren ? String(!isCollapsed) : 'false');
+        if (item.hasChildren) {
+          row.dataset.treeKey = item.key;
+          row.append(make('span', `virtual-tree-icon toggle${isCollapsed ? ' collapsed' : ''}`, isCollapsed ? '▸' : '▾'));
+        } else {
+          row.append(make('span', 'virtual-tree-icon', '·'));
+        }
+        row.append(make('strong', '', item.name), make('small', '', `${item.count} 项`));
       } else {
         row.append(
           make('span', 'virtual-tree-icon file', (item.file.extension || 'FILE').replace('.', '').slice(0, 4).toUpperCase()),
@@ -978,6 +1095,15 @@ function renderVirtualDirectoryTree(root) {
     canvas.replaceChildren(fragment);
   };
   viewport.addEventListener('scroll', paint, { passive: true });
+  viewport.addEventListener('click', (event) => {
+    const row = event.target.closest('.virtual-tree-row.collapsible');
+    if (!row || !viewport.contains(row)) return;
+    const key = row.dataset.treeKey;
+    if (!key) return;
+    if (collapsed.has(key)) collapsed.delete(key);
+    else collapsed.add(key);
+    paint();
+  });
   requestAnimationFrame(paint);
   return viewport;
 }
@@ -1033,7 +1159,7 @@ function renderCatalogEditor(record) {
     showPassword.addEventListener('click', () => {
       const showing = passwordInput.type === 'text';
       passwordInput.type = showing ? 'password' : 'text';
-      showPassword.textContent = showing ? '显示' : '隐藏';
+      showPassword.textContent = t(showing ? '显示' : '隐藏');
     });
     const editPassword = make('button', 'mini-copy-button', '修改');
     editPassword.type = 'button';
@@ -1042,14 +1168,14 @@ function renderCatalogEditor(record) {
         passwordInput.value = originalPassword;
         passwordInput.readOnly = true;
         passwordInput.type = 'password';
-        showPassword.textContent = '显示';
-        editPassword.textContent = '修改';
+        showPassword.textContent = t('显示');
+        editPassword.textContent = t('修改');
         passwordEditing = false;
       } else {
         passwordInput.readOnly = false;
         passwordInput.type = 'text';
-        showPassword.textContent = '隐藏';
-        editPassword.textContent = '取消';
+        showPassword.textContent = t('隐藏');
+        editPassword.textContent = t('取消');
         passwordEditing = true;
         passwordInput.focus();
         passwordInput.select();
@@ -1193,6 +1319,9 @@ function sourceLocationPresentation(record) {
     return { text: '未发现原文件', value: '', isPath: false, canOpen: false };
   }
   if (record.sourceDisposition === 'trashed') {
+    if (record.trashVerified === false) {
+      return { text: '已执行移入回收站，但回收站中未找到该文件——回收站可能已满，文件或已被永久删除', value: originalPath, isPath: false, canOpen: false, inTrash: true, warning: true };
+    }
     return { text: '源文件已进入回收站', value: originalPath, isPath: false, canOpen: Boolean(originalPath), inTrash: true };
   }
   if (record.sourceDisposition === 'moved') {
@@ -1385,17 +1514,24 @@ function renderSummary(state) {
   const jobs = state.jobs;
   const currentJob = jobs.find((job) => job.id === state.currentJobId);
   document.querySelector('#summary-total').textContent = String(jobs.length);
-  document.querySelector('#summary-confirm').textContent = String(jobs.filter((job) => ['awaiting_confirmation', 'awaiting_duplicate_confirmation', 'awaiting_anomaly_confirmation'].includes(job.status)).length);
+  document.querySelector('#summary-confirm').textContent = String(jobs.filter((job) => [
+    'awaiting_confirmation', 'awaiting_duplicate_confirmation', 'awaiting_anomaly_confirmation',
+    'awaiting_trash_safety_confirmation'
+  ].includes(job.status)).length);
   document.querySelector('#summary-queued').textContent = String(jobs.filter((job) => job.status === 'queued').length);
   document.querySelector('#summary-completed').textContent = String(jobs.filter((job) => job.status.startsWith('completed')).length);
   document.querySelector('#summary-bytes').textContent = formatBytes(jobs.reduce((sum, job) => sum + job.totalBytes, 0));
-  elements.runningIndicator.textContent = state.paused
+  elements.runningIndicator.textContent = t(state.paused
     ? '当前任务已暂停'
     : state.pauseAfterCurrent ? '完成本项后暂停'
       : state.scheduleWaiting ? '等待定时时段'
-        : state.running ? '队列运行中' : '空闲';
+        : state.running ? '队列运行中' : '空闲');
+  if (state.safetyHalt) {
+    elements.runningIndicator.textContent = t('安全停止：等待确认');
+  }
   elements.runningIndicator.classList.toggle('active', state.running);
   document.querySelector('#start-queue').disabled = state.running || !jobs.some((job) => job.status === 'queued');
+  if (state.safetyHalt) document.querySelector('#start-queue').disabled = true;
   document.querySelector('#scan-source').disabled = state.running;
   document.querySelector('#add-folder').disabled = state.running;
   document.querySelector('#add-video').disabled = state.running;
@@ -1410,16 +1546,24 @@ function renderSummary(state) {
     (job.status === 'awaiting_confirmation' && (job.confirmationReasons || []).some((reason) =>
       ['name_match', 'similar_title', 'same_video_size'].includes(reason))));
   elements.undoCatalog.disabled = !state.undoDepth;
-  elements.undoCatalog.textContent = state.undoDepth ? `撤回：${state.undoLabel}` : '撤回';
+  elements.undoCatalog.textContent = t(state.undoDepth ? `撤回：${state.undoLabel}` : '撤回');
 
   const canPause = state.running && !state.paused && ['inventorying', 'compressing', 'verifying'].includes(currentJob?.status);
   document.querySelector('#pause-queue').hidden = !canPause;
   document.querySelector('#resume-queue').hidden = !state.paused;
   renderSafetyChip(Boolean(state.config.autoTrashCompleted), Boolean(state.config.moveCompleted));
 
+  if (state.safetyHalt) {
+    elements.autoTrash.checked = false;
+    elements.trashSafetyMessage.textContent = t(state.safetyHalt.message);
+    if (!elements.trashSafetyDialog.open) elements.trashSafetyDialog.showModal();
+  } else if (elements.trashSafetyDialog.open) {
+    elements.trashSafetyDialog.close();
+  }
+
   if (state.skippedRootFiles.length > 0) {
     elements.looseSummary.hidden = false;
-    elements.looseSummary.textContent = `记录了 ${state.skippedRootFiles.length} 个根级跳过项（非视频、链接或无法读取的内容），当前不会自动移动。`;
+    elements.looseSummary.textContent = t(`记录了 ${state.skippedRootFiles.length} 个根级跳过项（非视频、链接或无法读取的内容），当前不会自动移动。`);
   } else {
     elements.looseSummary.hidden = true;
   }
@@ -1450,8 +1594,9 @@ function render(state, includeConfig = false) {
   if (nextCatalogSignature !== catalogStateSignature) {
     catalogStateSignature = nextCatalogSignature;
     catalogRefreshDirty = true;
-    if (currentCatalogResults.length === 0 && state.catalog.length > 0) void refreshCatalog();
+      if (currentCatalogResults.length === 0 && state.catalog.length > 0) void refreshCatalog();
   }
+  i18n?.translateDom(document.body);
 }
 
 async function saveConfig() {
@@ -1501,21 +1646,22 @@ document.querySelector('#save-settings').addEventListener('click', saveConfig);
 window.archiveApp.onUpdateProgress((progress) => {
   const button = document.querySelector('#check-for-updates');
   if (!button || progress?.stage === 'prepared') return;
-  if (progress.stage === 'verifying') button.textContent = '正在校验更新…';
-  else if (progress.stage === 'downloading') {
-    button.textContent = progress.totalBytes
+   if (progress.stage === 'verifying') button.textContent = t('正在校验更新…');
+   else if (progress.stage === 'downloading') {
+    button.textContent = t(progress.totalBytes
       ? `下载更新 ${progress.percentage}%`
-      : '正在下载更新…';
+      : '正在下载更新…');
   }
 });
 document.querySelector('#check-for-updates').addEventListener('click', async () => {
   const button = document.querySelector('#check-for-updates');
   button.disabled = true;
-  button.textContent = '正在检查…';
+  button.textContent = t('正在检查…');
   const result = await safely(() => window.archiveApp.checkForUpdates());
   button.disabled = false;
-  button.textContent = '检查更新';
-  if (result) showToast(result.updateAvailable ? `发现新版本 ${result.latestVersion}` : '当前已是最新版本');
+  button.textContent = t('检查更新');
+  if (result?.launchFailed) showToast(t('自动更新未能启动，程序仍停留在当前版本'));
+  else if (result) showToast(result.updateAvailable ? `发现新版本 ${result.latestVersion}` : '当前已是最新版本');
 });
 const usageGuideDialog = document.querySelector('#usage-guide-dialog');
 document.querySelector('#open-usage-guide').addEventListener('click', () => usageGuideDialog.showModal());
@@ -1539,7 +1685,7 @@ elements.smallItemFilter.addEventListener('change', () => { void saveConfig(); }
 elements.minimumTaskMb.addEventListener('change', () => { void saveConfig(); });
 elements.autoTrash.addEventListener('change', async () => {
   if (elements.autoTrash.checked) {
-    const accepted = window.confirm('启用后，每个任务只有在验证并入库成功后，才会把对应源文件夹或视频移入 Windows 回收站。是否启用？');
+    const accepted = confirmUser('启用后，每个任务只有在验证并入库成功后，才会把对应源文件夹或视频移入 Windows 回收站。是否启用？');
     if (!accepted) {
       elements.autoTrash.checked = false;
       return;
@@ -1552,7 +1698,7 @@ elements.autoTrash.addEventListener('change', async () => {
 document.querySelector('#toggle-password').addEventListener('click', () => {
   const showing = elements.password.type === 'text';
   elements.password.type = showing ? 'password' : 'text';
-  document.querySelector('#toggle-password').textContent = showing ? '显示' : '隐藏';
+  document.querySelector('#toggle-password').textContent = t(showing ? '显示' : '隐藏');
 });
 elements.password.addEventListener('change', () => { void saveConfig(); });
 elements.recordArchivePassword.addEventListener('change', () => { void saveConfig(); });
@@ -1567,7 +1713,7 @@ document.querySelector('#open-user-data').addEventListener('click', async () => 
 document.querySelector('#scan-source').addEventListener('click', async () => {
   const saved = await saveConfig();
   if (!saved) return;
-  elements.notice.textContent = '正在扫描下一级目录，请稍候…';
+  elements.notice.textContent = t('正在扫描下一级目录，请稍候…');
   elements.notice.hidden = false;
   const state = await safely(() => window.archiveApp.scanSource(elements.intakeDirectory.value.trim()));
   elements.notice.hidden = true;
@@ -1661,11 +1807,21 @@ document.querySelector('#resume-queue').addEventListener('click', async () => {
   const state = await safely(() => window.archiveApp.resumeQueue());
   if (state) render(state);
 });
+elements.acknowledgeTrashSafety.addEventListener('click', async () => {
+  const haltId = currentState?.safetyHalt?.id;
+  if (!haltId) return;
+  const state = await safely(() => window.archiveApp.acknowledgeTrashSafety(haltId));
+  if (state) {
+    render(state, true);
+    showToast('安全警告已确认；队列保持停止，自动移入回收站已关闭', true);
+  }
+});
+elements.trashSafetyDialog.addEventListener('cancel', (event) => event.preventDefault());
 
 document.querySelector('#toggle-task-list').addEventListener('click', (event) => {
   taskListCollapsed = !taskListCollapsed;
   elements.taskListContainer.hidden = taskListCollapsed;
-  event.currentTarget.textContent = taskListCollapsed ? '展开任务列表' : '折叠任务列表';
+  event.currentTarget.textContent = t(taskListCollapsed ? '展开任务列表' : '折叠任务列表');
 });
 
 elements.selectAllTasks.addEventListener('change', () => {
@@ -1708,12 +1864,15 @@ elements.taskList.addEventListener('click', async (event) => {
     }
     if (action === 'confirm') state = await safely(() => window.archiveApp.confirmTask(jobId));
     if (action === 'confirm-anomaly') {
-      if (!window.confirm('完整性测试已经通过，但压缩前后体积比例超出安全阈值。请先人工核对日志和源项目；确认仍要入库吗？')) return;
+      if (!confirmUser('完整性测试已经通过，但压缩前后体积比例超出安全阈值。请先人工核对日志和源项目；确认仍要入库吗？')) return;
       state = await safely(() => window.archiveApp.confirmAnomaly(jobId));
     }
     if (action === 'discard-anomaly') {
-      if (!window.confirm('删除这次异常任务生成的压缩文件和缩略图？源文件会完整保留在原位置，且不会加入仓库。')) return;
+      if (!confirmUser('删除这次异常任务生成的压缩文件和缩略图？源文件会完整保留在原位置，且不会加入仓库。')) return;
       state = await safely(() => window.archiveApp.discardAnomaly(jobId));
+    }
+    if (action === 'acknowledge-trash-safety') {
+      state = await safely(() => window.archiveApp.acknowledgeTrashSafety(jobId));
     }
     if (action === 'cancel') state = await safely(() => window.archiveApp.cancelTask(jobId));
     if (action === 'retry') state = await safely(() => window.archiveApp.retryTask(jobId));
@@ -1731,7 +1890,7 @@ elements.taskList.addEventListener('click', async (event) => {
 
 elements.removeSelected.addEventListener('click', async () => {
   if (selectedJobIds.size === 0) return;
-  if (!window.confirm(`从任务列表移除所选 ${selectedJobIds.size} 项？已入库档案和源文件不会删除。`)) return;
+  if (!confirmUser(`从任务列表移除所选 ${selectedJobIds.size} 项？已入库档案和源文件不会删除。`)) return;
   const state = await safely(() => window.archiveApp.removeJobs([...selectedJobIds]));
   if (state) {
     selectedJobIds.clear();
@@ -1740,7 +1899,7 @@ elements.removeSelected.addEventListener('click', async () => {
 });
 
 document.querySelector('#clear-queue').addEventListener('click', async () => {
-  if (!window.confirm('清空整个任务列表？如果当前正在运行，会停止当前任务并阻止后续任务启动。已入库档案和源文件不会删除。')) return;
+  if (!confirmUser('清空整个任务列表？如果当前正在运行，会停止当前任务并阻止后续任务启动。已入库档案和源文件不会删除。')) return;
   const state = await safely(() => window.archiveApp.clearQueue());
   if (state) {
     selectedJobIds.clear();
@@ -1759,7 +1918,7 @@ document.querySelector('#clear-completed').addEventListener('click', async () =>
 });
 
 document.querySelector('#clear-duplicates').addEventListener('click', async () => {
-  if (!window.confirm('从任务列表清除所有“名称可能重复”或“内容精确重复”的项目？已入库档案和源文件不会删除。')) return;
+  if (!confirmUser('从任务列表清除所有“名称可能重复”或“内容精确重复”的项目？已入库档案和源文件不会删除。')) return;
   const result = await safely(() => window.archiveApp.clearPotentialDuplicates());
   if (!result) return;
   selectedJobIds.clear();
@@ -1768,7 +1927,7 @@ document.querySelector('#clear-duplicates').addEventListener('click', async () =
 });
 
 document.querySelector('#confirm-all-duplicates').addEventListener('click', async () => {
-  if (!window.confirm('同意任务列表中全部名称重复、标题相似或视频大小相同的风险，并让它们进入等待压缩状态？')) return;
+  if (!confirmUser('同意任务列表中全部名称重复、标题相似或视频大小相同的风险，并让它们进入等待压缩状态？')) return;
   const result = await safely(() => window.archiveApp.confirmAllDuplicates());
   if (!result) return;
   render(result.state);
@@ -1827,6 +1986,19 @@ for (const filter of [elements.catalogTagFilter, elements.catalogBackupFilter, e
 }
 elements.catalogListView.addEventListener('click', () => setCatalogView('list'));
 elements.catalogGridView.addEventListener('click', () => setCatalogView('grid'));
+window.addEventListener('resize', () => {
+  if (catalogViewMode !== 'grid') return;
+  clearTimeout(catalogResizeTimer);
+  catalogResizeTimer = setTimeout(() => {
+    const nextColumns = measureCatalogGridColumns();
+    if (nextColumns !== catalogGridColumns) {
+      catalogGridColumns = nextColumns;
+      renderCatalog(currentCatalogResults);
+    } else {
+      stretchOrphanCatalogCards();
+    }
+  }, 150);
+});
 document.querySelector('#refresh-catalog').addEventListener('click', async () => {
   await refreshCatalog();
   await refreshWarehouseInsights(true);
@@ -1851,7 +2023,7 @@ document.querySelector('#export-warehouse').addEventListener('click', async () =
   if (result) showToast(`仓库压缩包已导出：${result.path}`);
 });
 document.querySelector('#import-warehouse').addEventListener('click', async () => {
-  if (!window.confirm('选择外部仓库压缩包（.zip）后，会把其中的仓库记录、缩略图和解压密码记录一并并入当前仓库。相同 ID 的记录会跳过；外部压缩包实体不会被移动或删除。是否继续？')) return;
+  if (!confirmUser('选择外部仓库压缩包（.zip）后，会把其中的仓库记录、缩略图和解压密码记录一并并入当前仓库。相同 ID 的记录会跳过；外部压缩包实体不会被移动或删除。是否继续？')) return;
   const result = await safely(() => window.archiveApp.importWarehouse());
   if (!result) return;
   render(result.state);
@@ -1916,14 +2088,14 @@ elements.setThumbnailCover.addEventListener('click', async () => {
   }
   if (activeCatalogId === updated.id) renderCatalogDetail(updated);
   elements.setThumbnailCover.disabled = true;
-  elements.setThumbnailCover.textContent = '当前项目封面';
+  elements.setThumbnailCover.textContent = t('当前项目封面');
   showToast('项目封面已更新');
 });
 
 elements.deleteThumbnail.addEventListener('click', async () => {
   if (!lightboxContext) return;
   const context = { ...lightboxContext };
-  if (!window.confirm('确定删除这张图片？删除后可以通过仓库顶部的“撤回”恢复。')) return;
+  if (!confirmUser('确定删除这张图片？删除后可以通过仓库顶部的“撤回”恢复。')) return;
   const updated = await safely(() => window.archiveApp.deleteCatalogImage(context.recordId, context.relativePath));
   if (!updated) return;
   closeThumbnailLightbox();
@@ -1951,7 +2123,7 @@ elements.catalogDetail.addEventListener('click', (event) => {
     void safely(() => window.archiveApp.openCatalogSource(openSource.dataset.openSource)).then(async (result) => {
       if (!result) return;
       if (result.status === 'trashed') {
-        if (!window.confirm('该原文件在 Windows 回收站中。要将文件从回收站移出到原位置吗？')) return;
+        if (!confirmUser('该原文件在 Windows 回收站中。要将文件从回收站移出到原位置吗？')) return;
         const restored = await safely(() => window.archiveApp.restoreCatalogSource(openSource.dataset.openSource));
         if (!restored) return;
         renderCatalogDetail(restored.record);
@@ -1973,9 +2145,10 @@ elements.catalogDetail.addEventListener('click', (event) => {
   const passwordToggle = event.target.closest('button[data-password-toggle]');
   if (passwordToggle) {
     const value = passwordToggle.parentElement.querySelector('.archive-password-value');
-    const showing = passwordToggle.textContent === '隐藏';
+    const showing = passwordToggle.dataset.passwordShowing === 'true';
+    passwordToggle.dataset.passwordShowing = String(!showing);
     value.textContent = showing ? '****' : passwordToggle.dataset.passwordToggle;
-    passwordToggle.textContent = showing ? '显示' : '隐藏';
+    passwordToggle.textContent = t(showing ? '显示' : '隐藏');
     return;
   }
   const copy = event.target.closest('button[data-copy-text]');
@@ -2113,13 +2286,13 @@ elements.deleteCatalogSelected.addEventListener('click', () => {
   const parts = [];
   if (archiveCount > 0) parts.push(`${archiveCount} 个普通归档的压缩包将移入 Windows 回收站`);
   if (manualCount > 0) parts.push(`${manualCount} 条手动库存记录将被移除`);
-  elements.deleteCatalogSummary.textContent = `所选 ${selectedRecords.length} 项：${parts.join('；')}。只有必要操作全部成功后，对应仓库记录才会删除。`;
+  elements.deleteCatalogSummary.textContent = t(`所选 ${selectedRecords.length} 项：${parts.join('；')}。只有必要操作全部成功后，对应仓库记录才会删除。`);
   const restorableCount = selectedRecords.filter((record) => ['moved', 'trashed'].includes(record.sourceDisposition)).length;
   elements.restoreOriginalSources.disabled = restorableCount === 0;
   elements.restoreOriginalSources.closest('.restore-source-option').classList.toggle('disabled', restorableCount === 0);
-  elements.restoreOriginalSourcesHelp.textContent = restorableCount > 0
+  elements.restoreOriginalSourcesHelp.textContent = t(restorableCount > 0
     ? `其中 ${restorableCount} 项记录为已移动或已进入回收站；复原失败时会保留对应仓库记录和压缩包。`
-    : '所选项目没有可以尝试复原的原文件记录。';
+    : '所选项目没有可以尝试复原的原文件记录。');
   elements.deleteCatalogDialog.showModal();
 });
 
@@ -2280,7 +2453,7 @@ window.archiveApp.onTaskProgress((progress) => {
     const progressText = row.querySelector('.progress-text');
     if (status) {
       status.className = `status-pill ${progress.stage}`;
-      status.textContent = statusLabels[progress.stage] || progress.stage;
+      status.textContent = t(statusLabels[progress.stage] || progress.stage);
     }
     if (fill) fill.style.width = `${Math.max(0, Math.min(100, progress.percentage))}%`;
     if (progressText) progressText.textContent = taskProgressText(job, progress.percentage);
@@ -2297,7 +2470,7 @@ window.archiveApp.onCatalogChanged((catalog) => {
 });
 window.archiveApp.onScanProgress((progress) => {
   elements.notice.hidden = false;
-  elements.notice.textContent = `正在统计 ${progress.displayName}（${progress.index + 1}/${progress.total}）…`;
+  elements.notice.textContent = t(`正在统计 ${progress.displayName}（${progress.index + 1}/${progress.total}）…`);
 });
 
 setCatalogView(catalogViewMode);

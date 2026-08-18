@@ -23,7 +23,7 @@ async function checkForUpdates({ currentVersion, fetchImpl = globalThis.fetch, t
   let response;
   try {
     response = await fetchImpl(LATEST_RELEASE_API, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'hamster-archive-update-checker' },
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'hamster-archiver-update-checker' },
       signal: AbortSignal.timeout(timeoutMs)
     });
   } catch (error) {
@@ -39,9 +39,8 @@ async function checkForUpdates({ currentVersion, fetchImpl = globalThis.fetch, t
   const release = await response.json();
   const latestVersion = String(release.tag_name || '').replace(/^v/i, '');
   const assets = Array.isArray(release.assets) ? release.assets : [];
-  const archiveAsset = assets.find((asset) =>
-    String(asset.name || '').toLowerCase() === `hamsterarchive-v${latestVersion}-win-x64.zip`.toLowerCase()
-  ) || assets.find((asset) => String(asset.name || '').toLowerCase().endsWith('.zip'));
+  const expectedAssetName = `hamsterarchiver-v${latestVersion}-win-x64.zip`.toLowerCase();
+  const archiveAsset = assets.find((asset) => String(asset.name || '').toLowerCase() === expectedAssetName);
   return {
     currentVersion,
     latestVersion,

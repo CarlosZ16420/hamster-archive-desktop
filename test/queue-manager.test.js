@@ -374,47 +374,6 @@ test('legacy catalog records receive an empty hidden original source location', 
   assert.equal(store.catalog[0].originalSourcePath, '');
 });
 
-test('source audit marks missing moved, recycled and pathless originals once', async () => {
-  const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' }, {
-    pathExists: async () => false,
-    isTrashItemPresent: async () => false
-  });
-  manager.catalog = [
-    { id: 'moved', title: '已移动', sourceDisposition: 'moved', movedTo: 'E:\\done\\moved', originalSourcePath: 'E:\\source\\moved' },
-    { id: 'trash', title: '回收站', sourceDisposition: 'trashed', originalSourcePath: 'E:\\source\\trash' },
-    { id: 'legacy-trash', title: '旧回收站记录', sourceDisposition: 'trashed', originalSourcePath: '' },
-    { id: 'missing', title: '已消失', sourceDisposition: 'missing', originalSourcePath: '' }
-  ];
-  const result = await manager.auditTrackedSourceLocations({ limit: 10 });
-  assert.deepEqual(result, { checked: 3, missing: 3 });
-  assert.equal(manager.catalog[0].sourceDisposition, 'missing');
-  assert.equal(manager.catalog[1].sourceDisposition, 'missing');
-  assert.equal(manager.catalog[2].sourceDisposition, 'missing');
-  assert.equal(manager.catalog[0].originalSourcePath, '');
-  assert.equal(manager.catalog[1].originalSourcePath, '');
-  const second = await manager.auditTrackedSourceLocations({ limit: 10 });
-  assert.deepEqual(second, { checked: 0, missing: 0 });
-});
-
-test('startup-style source audit checks the complete catalog in bounded recycle-bin batches', async () => {
-  const batchSizes = [];
-  const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' }, {
-    findTrashItems: async (paths) => {
-      batchSizes.push(paths.length);
-      return paths;
-    }
-  });
-  manager.catalog = Array.from({ length: 205 }, (_, index) => ({
-    id: `trash-${index}`,
-    title: `回收站 ${index}`,
-    sourceDisposition: 'trashed',
-    originalSourcePath: `E:\\source\\trash-${index}`
-  }));
-  const result = await manager.auditTrackedSourceLocations();
-  assert.deepEqual(result, { checked: 205, missing: 0 });
-  assert.deepEqual(batchSizes, [100, 100, 5]);
-});
-
 test('completed source movement refuses collisions and preserves the source', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-source-move-'));
   try {
@@ -566,7 +525,8 @@ test('automatic trash runs only after archive metadata and thumbnails are saved'
       return manifest;
     },
     validateSourceBeforeDisposition: async () => { events.push('source-check'); },
-    trashItem: async () => { events.push('trash'); }
+    trashItem: async () => { events.push('trash'); },
+    isTrashItemPresent: async () => true
   });
   manager.jobs = [queuedJob('one')];
 
@@ -578,6 +538,118 @@ test('automatic trash runs only after archive metadata and thumbnails are saved'
   assert.ok(events.indexOf('archive') < events.indexOf('thumbnails'));
   assert.ok(events.indexOf('thumbnails') < events.indexOf('catalog'));
   assert.ok(events.indexOf('catalog') < events.indexOf('trash'));
+});
+
+test('silent recycle-bin loss stops the queue until the user acknowledges the safety halt', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-trash-safety-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const firstSource = path.join(root, 'first');
+  const secondSource = path.join(root, 'second');
+  await fs.mkdir(firstSource, { recursive: true });
+  await fs.mkdir(secondSource, { recursive: true });
+  const calls = [];
+  const manager = new QueueManager(new FakeStore(), {
+    libraryDir: path.join(root, 'library'),
+    autoTrashCompleted: true
+  }, {
+    archiveRunner: async (job) => {
+      calls.push(job.id);
+      return {
+        archiveFolder: null,
+        archiveFiles: [{ name: `${job.id}.7z`, size: 1 }],
+        archiveTotalBytes: 1,
+        manifest: [{ relativePath: 'file.bin', name: 'file.bin', size: 1, md5: 'abc' }],
+        directories: [],
+        passwordScheme: 'configured-v1',
+        verifiedAt: new Date().toISOString()
+      };
+    },
+    validateSourceBeforeDisposition: async () => {},
+    trashItem: async (targetPath) => { await fs.rm(targetPath, { recursive: true, force: true }); },
+    isTrashItemPresent: async () => false
+  });
+  manager.jobs = [
+    { ...queuedJob('first'), sourcePath: firstSource },
+    { ...queuedJob('second'), sourcePath: secondSource }
+  ];
+
+  await manager.startQueue();
+
+  assert.deepEqual(calls, ['first']);
+  assert.equal(manager.running, false);
+  assert.equal(manager.config.autoTrashCompleted, false);
+  assert.equal(manager.jobs[0].status, 'awaiting_trash_safety_confirmation');
+  assert.equal(manager.jobs[0].errorCode, 'TRASH_RETENTION_FAILED');
+  assert.equal(manager.jobs[1].status, 'queued');
+  assert.equal(manager.catalog[0].sourceDisposition, 'missing');
+  assert.equal(manager.getState().safetyHalt.jobId, 'first');
+  assert.equal(manager.config.pendingTrashSafetyHalt.jobId, 'first');
+  await assert.rejects(fs.access(firstSource), /ENOENT/);
+  await fs.access(secondSource);
+
+  await manager.startQueue();
+  assert.deepEqual(calls, ['first']);
+
+  await manager.acknowledgeTrashSafetyHalt('first');
+  assert.equal(manager.jobs[0].status, 'completed_cleanup_failed');
+  assert.equal(manager.getState().safetyHalt, null);
+  assert.equal(manager.config.pendingTrashSafetyHalt, undefined);
+  await manager.startQueue();
+  assert.deepEqual(calls, ['first', 'second']);
+  assert.equal(manager.jobs[1].status, 'completed');
+  assert.equal(manager.catalog[1].sourceDisposition, 'kept');
+  await fs.access(secondSource);
+});
+
+test('recycle-bin safety halt survives an application restart', async () => {
+  const store = new FakeStore();
+  store.loadJobs = async () => [{
+    ...queuedJob('lost-source'),
+    status: 'awaiting_trash_safety_confirmation',
+    errorMessage: '回收站没有保留原文件',
+    sourceStillExists: false,
+    safetyHaltAt: '2026-08-19T00:00:00.000Z'
+  }];
+  const pendingTrashSafetyHalt = {
+    id: 'halt-one',
+    type: 'trash_retention',
+    jobId: 'lost-source',
+    message: '回收站没有保留原文件',
+    sourceStillExists: false,
+    detectedAt: '2026-08-19T00:00:00.000Z'
+  };
+  const manager = new QueueManager(store, {
+    libraryDir: 'E:\\library',
+    autoTrashCompleted: true,
+    pendingTrashSafetyHalt
+  });
+
+  await manager.initialize();
+
+  assert.equal(manager.config.autoTrashCompleted, false);
+  assert.equal(manager.getState().safetyHalt.id, 'halt-one');
+  await manager.startQueue();
+  assert.equal(manager.jobs[0].status, 'awaiting_trash_safety_confirmation');
+});
+
+test('obsolete historical recycle-bin audit halt is cleared on startup', async () => {
+  const manager = new QueueManager(new FakeStore(), {
+    libraryDir: 'E:\\library',
+    autoTrashCompleted: false,
+    pendingTrashSafetyHalt: {
+      id: 'old-audit-halt',
+      type: 'trash_retention_audit',
+      recordId: 'historical-record',
+      message: '旧项目已不在回收站',
+      sourceStillExists: false,
+      detectedAt: '2026-08-19T00:00:00.000Z'
+    }
+  });
+
+  await manager.initialize();
+
+  assert.equal(manager.getState().safetyHalt, null);
+  assert.equal(manager.config.pendingTrashSafetyHalt, undefined);
 });
 
 test('catalog metadata supports defaults, editing, cover thumbnails and filters', async () => {

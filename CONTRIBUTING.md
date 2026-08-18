@@ -1,6 +1,6 @@
 # Contributing
 
-感谢你愿意改进 Hamster Archive。
+感谢你愿意改进 Hamster Archiver。
 
 ## 开发流程
 

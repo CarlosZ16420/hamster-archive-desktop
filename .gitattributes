@@ -43,3 +43,4 @@ logs/ export-ignore
 .env export-ignore
 .env.* export-ignore
 HamsterArchive.exe export-ignore
+HamsterArchiver.exe export-ignore

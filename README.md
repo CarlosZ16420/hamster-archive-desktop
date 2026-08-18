@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="README.assets/iconC_cropped_1022x1022.png" alt="Hamster Archive 像素仓鼠图标" width="112">
+<img src="README.assets/iconC_cropped_1022x1022.png" alt="Hamster Archiver 像素仓鼠图标" width="112">
 
-# 仓鼠症大结局 Hamster Archive
+# 仓鼠症大结局 Hamster Archiver
 
 ### 把散乱的大文件变成可校验的压缩包，也变成能搜索、能预览的本地仓库
 
@@ -10,7 +10,7 @@ Local-first batch archiver and searchable media vault for Windows.
 
 本地优先 · 批量归档 · 媒体预览 · 便携数据
 
-![Version](https://img.shields.io/badge/version-4.1.0-d45f3c?style=flat-square)
+![Version](https://img.shields.io/badge/version-4.2.0-d45f3c?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-23211d?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-2f7558?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-43-456f83?style=flat-square)
@@ -35,7 +35,7 @@ Local-first batch archiver and searchable media vault for Windows.
 
 ## 它做什么
 
-把下载目录里堆成山的文件夹和视频，逐个压缩、校验、登记到一个可搜索的本地仓库。普通压缩工具只生成压缩包；Hamster Archive 同时告诉你**里面是什么、放到了哪里、是否已经收过**。
+把下载目录里堆成山的文件夹和视频，逐个压缩、校验、登记到一个可搜索的本地仓库。普通压缩工具只生成压缩包；Hamster Archiver 同时告诉你**里面是什么、放到了哪里、是否已经收过**。
 
 ```text
 扫描 → 清单与查重 → 7-Zip（7z/ZIP）压缩 → 完整性验证 → 建立仓库记录 → 后处理原文件
@@ -49,9 +49,9 @@ Local-first batch archiver and searchable media vault for Windows.
 
 ## 界面一览
 
-![Hamster Archive 四个代表性界面：归档工作台、真实任务队列、仓库概览与大缩略图仓库](docs/images/interface-overview.png)
+![Hamster Archiver 四个代表性界面：归档工作台、真实任务队列、仓库概览与大缩略图仓库](docs/images/interface-overview.png)
 
-![Hamster Archive 四个代表性界面：归档工作台、真实任务队列、仓库概览与大缩略图仓库](docs/images/detail.png)
+![Hamster Archiver 四个代表性界面：归档工作台、真实任务队列、仓库概览与大缩略图仓库](docs/images/detail.png)
 
 
 
@@ -95,7 +95,7 @@ Local-first batch archiver and searchable media vault for Windows.
 - 每个项目保存独立的隐藏原始路径字段，旧记录缺少该字段时会安全补为空值。
 - 未移动的项目显示原路径；已移动或进入回收站的项目显示当前状态。
 - 详情页可打开原文件当前位置；回收站中的项目可确认复原到原位置，成功后自动打开对应目录。
-- 应用启动后会在后台分批核验全部已移动或已回收的项目，并定期复查；预期位置不存在时标为“未发现原文件”，之后不再重复检查。
+- 当前任务执行源文件处理后会立即复核本次操作；只有本次任务无法确认回收站保留时才会触发安全熔断。历史项目不会被后台抽查，避免把用户主动清理误报成任务事故。
 - 删除仓库记录时，可选择尝试把已移动或已回收的原文件复原到原始位置；复原失败不会继续删除记录和压缩包。
 
 ### 仓库整理
@@ -104,16 +104,29 @@ Local-first batch archiver and searchable media vault for Windows.
 - 密码默认遮盖，只在主动显示后可查看或复制。
 - 批量追加标签、批量修改备份位置、多选删除和最多十步撤回。
 - 手动新增无压缩包的库存记录，以及仓库导出、并入外部仓库。
+- 界面提供“⇄ EN / ⇄ 中文”语言切换按钮；语言设置保存在便携式 `userdata` 中。
 
 ## 快速开始
 
 ### 直接使用发行版
 
 1. 在 [Releases](../../releases) 下载 Windows x64 压缩包。
-2. 完整解压后运行 `HamsterArchive.exe`。
+2. 完整解压后运行 `HamsterArchiver.exe`。
 3. 选择“需要备份的文件主目录”和“打包后文件存放点”，先扫描并确认任务，再开始压缩入库。
 
 请保留发行包的目录结构，不要只复制 EXE。Electron 运行库、7-Zip、FFmpeg 与 `userdata` 都依赖相对位置。应用和数据盘整体换盘后，相对工具路径仍能自动定位。
+
+### 自动更新失败时手动更新
+
+如果应用提示自动更新没有完成，旧版本不会被删除，可以继续使用。建议按下面的方式迁移，直接复制便携数据比重新导入仓库更完整：
+
+1. 在旧版本的“仓库”中先导出一次仓库作为保险，然后完全退出应用。
+2. 从 [Releases](../../releases) 下载最新 Windows x64 压缩包，完整解压到一个**新文件夹**；不要只替换 EXE，也不要覆盖仍在运行的旧目录。
+3. 确认两个版本都已关闭，把旧版本目录中的 `userdata` 整个复制到新版本目录，覆盖新版本中尚为空白的 `userdata`。
+4. 运行新目录中的 `HamsterArchiver.exe`，确认版本号、仓库记录和缩略图正常后，再删除旧版本目录。
+5. 如果复制 `userdata` 后仓库无法读取，请保留旧目录，并在新版本中使用“并入外部仓库”导入第 1 步导出的仓库压缩包。
+
+更新器只有确认独立更新助手已经启动，才会退出主程序。启动失败会留在当前版本并显示手动更新步骤；替换或启动验证失败时会自动回滚，并在旧版本重新打开后展示失败原因和诊断目录。
 
 ### 从源码运行
 
@@ -133,8 +146,8 @@ npm start
 ## 便携数据布局
 
 ```text
-HamsterArchive-v4.1.0-win-x64/
-├─ HamsterArchive.exe
+HamsterArchiver-v4.2.0-win-x64/
+├─ HamsterArchiver.exe
 ├─ tools/
 │  ├─ 7zip/
 │  └─ ffmpeg/

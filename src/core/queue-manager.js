@@ -298,6 +298,7 @@ class QueueManager extends EventEmitter {
     }
     this.store = store;
     this.config = {
+      language: 'zh-CN',
       archivePassword: ARCHIVE_PASSWORD,
       archiveNamingMode: 'timestamp_random',
       customArchiveName: '',
@@ -341,11 +342,21 @@ class QueueManager extends EventEmitter {
     this.progressEmissionTimer = null;
     this.pendingProgress = null;
     this.randomWalkBag = [];
-    this.sourceAuditRunning = false;
+    this.safetyHalt = this.config.pendingTrashSafetyHalt && typeof this.config.pendingTrashSafetyHalt === 'object'
+      ? { ...this.config.pendingTrashSafetyHalt }
+      : null;
     this.services = services;
   }
 
   async initialize() {
+    // A short-lived development build treated missing historical recycle-bin items as a
+    // queue safety incident. Historical records can disappear because the user emptied
+    // the recycle bin, so only a failure verified during the current task may halt work.
+    if (this.safetyHalt?.type === 'trash_retention_audit') {
+      this.safetyHalt = null;
+      delete this.config.pendingTrashSafetyHalt;
+      await this.store.saveSettings(this.config);
+    }
     if (this.config.archiveStagingDirectory) await fs.mkdir(this.config.archiveStagingDirectory, { recursive: true });
     if (this.config.moveCompleted && this.config.processedSourceDirectory) {
       await fs.mkdir(this.config.processedSourceDirectory, { recursive: true });
@@ -402,6 +413,23 @@ class QueueManager extends EventEmitter {
       };
     });
     if (recovered) await this.persistJobs();
+    const pendingTrashSafetyJob = this.jobs.find((job) => job.status === 'awaiting_trash_safety_confirmation');
+    if (!this.safetyHalt && pendingTrashSafetyJob) {
+      this.safetyHalt = {
+        id: crypto.randomUUID(),
+        type: 'trash_retention',
+        jobId: pendingTrashSafetyJob.id,
+        message: pendingTrashSafetyJob.errorMessage || '回收站没有保留原文件，队列已停止。',
+        sourceStillExists: Boolean(pendingTrashSafetyJob.sourceStillExists),
+        detectedAt: pendingTrashSafetyJob.safetyHaltAt || pendingTrashSafetyJob.completedAt || new Date().toISOString()
+      };
+      this.config.pendingTrashSafetyHalt = { ...this.safetyHalt };
+      await this.store.saveSettings(this.config);
+    }
+    if (this.safetyHalt && this.config.autoTrashCompleted) {
+      this.config.autoTrashCompleted = false;
+      await this.store.saveSettings(this.config);
+    }
     this.emitState();
   }
 
@@ -419,6 +447,7 @@ class QueueManager extends EventEmitter {
       paused: this.paused,
       pauseAfterCurrent: this.pauseAfterCurrent,
       scheduleWaiting: this.scheduleWaiting,
+      safetyHalt: this.safetyHalt ? { ...this.safetyHalt } : null,
       undoDepth: this.undoStack.length,
       undoLabel: this.undoStack.at(-1)?.label || '',
       currentJobId: this.jobs.find((job) => RUNNING_STATUSES.has(job.status))?.id || null
@@ -731,82 +760,6 @@ class QueueManager extends EventEmitter {
     const recordId = this.randomWalkBag.pop();
     const record = this.catalog.find((candidate) => candidate.id === recordId) || this.catalog[0];
     return this.summarizeCatalogRecord(record);
-  }
-
-  async auditTrackedSourceLocations({ limit = Number.POSITIVE_INFINITY, batchSize = 100 } = {}) {
-    if (this.sourceAuditRunning) return { checked: 0, missing: 0, alreadyRunning: true };
-    const candidates = this.catalog.filter((record) => ['moved', 'trashed'].includes(record.sourceDisposition));
-    if (candidates.length === 0) return { checked: 0, missing: 0 };
-    const numericLimit = Number(limit);
-    const selected = Number.isFinite(numericLimit)
-      ? candidates.slice(0, Math.max(1, Math.min(candidates.length, Math.floor(numericLimit))))
-      : candidates;
-    const safeBatchSize = Math.max(1, Math.min(100, Math.floor(Number(batchSize) || 100)));
-    let missing = 0;
-    this.sourceAuditRunning = true;
-    try {
-      await this.log('info', `开始后台核验 ${selected.length} 个原文件位置。`, null, false);
-      for (let start = 0; start < selected.length; start += safeBatchSize) {
-        const batch = selected.slice(start, start + safeBatchSize);
-        let trashPresence = null;
-        let trashAuditUnavailable = false;
-        const trashPaths = batch
-          .filter((record) => record.sourceDisposition === 'trashed')
-          .map(getOriginalSourcePath)
-          .filter(Boolean);
-        if (trashPaths.length > 0 && this.services.findTrashItems) {
-          try {
-            const found = await this.services.findTrashItems(trashPaths);
-            trashPresence = new Set(found.map((item) => normalizeForComparison(item)));
-          } catch (error) {
-            trashAuditUnavailable = true;
-            await this.log('warning', `Windows 回收站批量核验暂时失败：${error.message}`, null, false);
-          }
-        }
-        for (const record of batch) {
-          const originalPath = getOriginalSourcePath(record);
-          let present = true;
-          try {
-            if (!originalPath) {
-              present = false;
-            } else if (record.sourceDisposition === 'moved') {
-              const expectedPath = String(record.movedTo || '').trim();
-              present = Boolean(expectedPath) && await (this.services.pathExists || (async (targetPath) => {
-                try { await fs.access(targetPath); return true; } catch (error) {
-                  if (error.code === 'ENOENT') return false;
-                  throw error;
-                }
-              }))(expectedPath);
-            } else {
-              if (trashAuditUnavailable) continue;
-              if (trashPresence) present = trashPresence.has(normalizeForComparison(originalPath));
-              else if (this.services.isTrashItemPresent) present = await this.services.isTrashItemPresent(originalPath);
-              else continue;
-            }
-          } catch (error) {
-            await this.log('warning', `原文件位置核验暂时失败：${record.title} · ${error.message}`, record.jobId, false);
-            continue;
-          }
-          record.sourceLocationCheckedAt = new Date().toISOString();
-          if (present) continue;
-          record.sourceDisposition = 'missing';
-          record.originalSourcePath = '';
-          record.movedTo = '';
-          record.metadataUpdatedAt = new Date().toISOString();
-          missing += 1;
-          await this.log('warning', `原文件已不在记录位置，状态已更新为“未发现原文件”：${record.title}`, record.jobId, false);
-        }
-        await new Promise((resolve) => setImmediate(resolve));
-      }
-      if (missing > 0) {
-        await this.store.saveCatalog(this.config.repositoryDirectory, this.catalog);
-        this.emitState();
-      }
-      await this.log('info', `原文件位置核验完成：检查 ${selected.length} 项，更新 ${missing} 项。`, null, false);
-      return { checked: selected.length, missing };
-    } finally {
-      this.sourceAuditRunning = false;
-    }
   }
 
   refreshSimilarityForRecord(record) {
@@ -1396,6 +1349,9 @@ class QueueManager extends EventEmitter {
     const moveCompleted = Boolean(config.moveCompleted);
     const autoTrashCompleted = Boolean(config.autoTrashCompleted);
     if (moveCompleted && autoTrashCompleted) throw new Error('归档后移动与移入回收站不能同时启用。');
+    if (this.safetyHalt && autoTrashCompleted) {
+      throw new Error('请先确认回收站安全警告，再决定是否重新启用自动移入回收站。');
+    }
     const processedSourceDirectory = String(
       config.processedSourceDirectory ?? this.config.processedSourceDirectory ?? ''
     ).trim();
@@ -1745,6 +1701,39 @@ class QueueManager extends EventEmitter {
       await this.services.trashItem(job.sourcePath);
       record.sourceDisposition = 'trashed';
       record.trashedAt = new Date().toISOString();
+      // Windows 回收站空间不足、超出配额或不支持该项目时，系统调用可能完成，
+      // 但项目未必仍可从回收站恢复。必须独立复核，失败时由调用方熔断整个队列。
+      let trashVerified = null;
+      if (this.services.isTrashItemPresent) {
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          try {
+            trashVerified = await this.services.isTrashItemPresent(job.sourcePath);
+          } catch (error) {
+            trashVerified = null;
+            await this.log('warning', `回收站复核暂时不可用：${record.title} · ${error.message}`, job.id, false);
+            break;
+          }
+          if (trashVerified) break;
+          if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 1_000));
+        }
+      }
+      record.trashVerified = trashVerified;
+      if (trashVerified !== true) {
+        let sourceStillExists = false;
+        try { await fs.access(job.sourcePath); sourceStillExists = true; } catch { sourceStillExists = false; }
+        const verificationUnavailable = trashVerified === null;
+        const error = new Error(sourceStillExists
+          ? '源项目没有进入回收站，仍保留在原位置。为避免后续项目发生永久删除，队列已安全停止。'
+          : verificationUnavailable
+            ? '无法确认源项目是否保留在回收站，且原位置已经不存在。队列已安全停止，请立即检查回收站。'
+            : '源项目在原位置和回收站中都未找到。回收站可能已满或超出配额，文件可能已被永久删除；队列已安全停止。');
+        error.code = sourceStillExists
+          ? 'TRASH_NOT_PERFORMED'
+          : verificationUnavailable ? 'TRASH_VERIFICATION_UNAVAILABLE' : 'TRASH_RETENTION_FAILED';
+        error.sourceStillExists = sourceStillExists;
+        error.trashVerified = trashVerified;
+        throw error;
+      }
       return '已验证入库，源项目已移入回收站';
     }
     record.sourceDisposition = 'kept';
@@ -2017,6 +2006,27 @@ class QueueManager extends EventEmitter {
     return this.getState();
   }
 
+  async acknowledgeTrashSafetyHalt(referenceId) {
+    const halt = this.safetyHalt;
+    if (!halt || ![halt.id, halt.jobId, halt.recordId].filter(Boolean).includes(referenceId)) {
+      throw new Error('当前没有与该项目对应的回收站安全警告。');
+    }
+    const job = halt.jobId ? this.jobs.find((candidate) => candidate.id === halt.jobId) : null;
+    if (job?.status === 'awaiting_trash_safety_confirmation') {
+      job.status = 'completed_cleanup_failed';
+      job.safetyAcknowledgedAt = new Date().toISOString();
+      job.stageText = job.sourceStillExists
+        ? '归档已入库；原文件仍在原位置，自动移入回收站已关闭'
+        : '归档已入库；未能在回收站或原位置找到源文件，自动移入回收站已关闭';
+    }
+    this.safetyHalt = null;
+    delete this.config.pendingTrashSafetyHalt;
+    await this.store.saveSettings(this.config);
+    await this.persistJobs();
+    await this.log('warning', '用户已确认回收站安全警告；队列仍保持停止，后续任务需手动重新开始。', job?.id || null);
+    return this.getState();
+  }
+
   async cancelJob(jobId) {
     const job = this.findJob(jobId);
     if (RUNNING_STATUSES.has(job.status)) {
@@ -2159,6 +2169,9 @@ class QueueManager extends EventEmitter {
     if (this.jobs.some((job) => ids.has(job.id) && job.status === 'awaiting_anomaly_confirmation')) {
       throw new Error('大小异常的成品已经生成，请先确认入库，不能直接从任务列表移除。');
     }
+    if (this.jobs.some((job) => ids.has(job.id) && job.status === 'awaiting_trash_safety_confirmation')) {
+      throw new Error('回收站安全警告尚未确认，不能直接移除对应任务。');
+    }
     for (const jobId of ids) {
     await this.store.deletePendingManifest(this.config.repositoryDirectory, jobId);
     }
@@ -2204,8 +2217,9 @@ class QueueManager extends EventEmitter {
       this.abortController?.abort();
       await idle;
     }
-    const protectedJobs = this.jobs.filter((job) => job.status === 'awaiting_anomaly_confirmation');
-    const ids = this.jobs.filter((job) => job.status !== 'awaiting_anomaly_confirmation').map((job) => job.id);
+    const protectedStatuses = new Set(['awaiting_anomaly_confirmation', 'awaiting_trash_safety_confirmation']);
+    const protectedJobs = this.jobs.filter((job) => protectedStatuses.has(job.status));
+    const ids = this.jobs.filter((job) => !protectedStatuses.has(job.status)).map((job) => job.id);
     for (const jobId of ids) {
     await this.store.deletePendingManifest(this.config.repositoryDirectory, jobId);
     }
@@ -2213,13 +2227,17 @@ class QueueManager extends EventEmitter {
     await this.persistJobs();
     this.stopRequested = false;
     await this.log('warning', protectedJobs.length > 0
-      ? `任务列表已清理；${protectedJobs.length} 个大小异常成品仍等待确认。`
+      ? `任务列表已清理；${protectedJobs.length} 个安全或大小异常任务仍等待确认。`
       : '任务列表已清空；已入库档案和源文件均未删除。');
     return this.getState();
   }
 
   async startQueue() {
     if (this.running) return this.getState();
+    if (this.safetyHalt || this.jobs.some((job) => job.status === 'awaiting_trash_safety_confirmation')) {
+      await this.log('warning', '回收站安全警告尚未确认，队列保持停止。');
+      return this.getState();
+    }
     this.running = true;
     this.stopRequested = false;
     this.emitState();
@@ -2438,12 +2456,55 @@ class QueueManager extends EventEmitter {
 
       let completionStatus = 'completed';
       let completionText = '已验证并入库';
-      if (completionAction !== 'keep' && !skipSourceAction) {
+      if (completionAction !== 'keep' && !skipSourceAction && !this.safetyHalt) {
         try {
           completionText = await this.completeSourceDisposition(record, job);
           await this.store.saveCatalog(this.config.repositoryDirectory, this.catalog);
           await this.log('warning', completionText, job.id);
         } catch (error) {
+          if (['TRASH_NOT_PERFORMED', 'TRASH_VERIFICATION_UNAVAILABLE', 'TRASH_RETENTION_FAILED'].includes(error.code)) {
+            const sourceStillExists = Boolean(error.sourceStillExists);
+            const detectedAt = new Date().toISOString();
+            record.sourceDisposition = sourceStillExists ? 'kept' : 'missing';
+            record.sourceActionError = error.message;
+            record.trashVerified = error.trashVerified;
+            record.trashVerificationFailedAt = detectedAt;
+            record.metadataUpdatedAt = detectedAt;
+            if (sourceStillExists) {
+              delete record.trashedAt;
+            } else {
+              record.originalSourcePath = '';
+              record.movedTo = '';
+            }
+            this.config.autoTrashCompleted = false;
+            this.stopRequested = true;
+            this.safetyHalt = {
+              id: crypto.randomUUID(),
+              type: 'trash_retention',
+              jobId: job.id,
+              message: error.message,
+              sourceStillExists,
+              detectedAt
+            };
+            this.config.pendingTrashSafetyHalt = { ...this.safetyHalt };
+            await this.store.saveSettings(this.config);
+            await this.store.saveCatalog(this.config.repositoryDirectory, this.catalog);
+            await this.updateJob(job, {
+              status: 'awaiting_trash_safety_confirmation',
+              stageText: sourceStillExists
+                ? '安全停止：原文件未进入回收站，仍在原位置'
+                : '安全停止：回收站未保留原文件，请立即检查',
+              progress: 100,
+              archiveFiles: result.archiveFiles,
+              completedAt,
+              errorCode: error.code,
+              errorMessage: error.message,
+              sourceStillExists,
+              safetyHaltAt: detectedAt
+            });
+            await this.log('error', `回收站安全熔断：${error.message} 自动移入回收站已关闭，后续任务没有启动。`, job.id);
+            return;
+          }
           record.sourceDisposition = `${completionAction}_failed`;
           record.sourceActionError = error.message;
           await this.store.saveCatalog(this.config.repositoryDirectory, this.catalog);
@@ -2453,8 +2514,15 @@ class QueueManager extends EventEmitter {
             : '归档成功，但移入回收站失败';
           await this.log('error', completionText + `：${error.message}`, job.id);
         }
-      } else if (completionAction !== 'keep' && skipSourceAction) {
-        completionText = hasSkippedFiles
+      } else if (completionAction !== 'keep' && (skipSourceAction || this.safetyHalt)) {
+        if (this.safetyHalt) {
+          record.sourceDisposition = 'kept';
+          record.sourceActionError = '回收站安全熔断期间未执行源文件后处理。';
+          await this.store.saveCatalog(this.config.repositoryDirectory, this.catalog);
+        }
+        completionText = this.safetyHalt
+          ? '已验证入库；因回收站安全熔断，源项目保留在原位置'
+          : hasSkippedFiles
           ? `已验证入库；有 ${(record.skippedFiles || []).length} 个内容无法读取，源项目为防止遗漏而保留`
           : '已验证入库；因队列正在停止，源项目已保留';
         await this.log('warning', completionText, job.id);
