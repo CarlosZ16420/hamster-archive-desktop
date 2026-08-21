@@ -170,13 +170,15 @@ test('failed replacement is surfaced once on the next application start', async 
   assert.equal(await consumeUpdateFailure(userDataRoot), null);
 });
 
-test('manual update guide preserves portable userdata and provides export fallback', () => {
+test('manual update guide recommends warehouse export and import instead of copying userdata', () => {
   const guide = manualUpdateInstructions();
-  assert.match(guide, /userdata/);
-  assert.match(guide, /导出一次仓库/);
+  assert.match(guide, /导出仓库/);
   assert.match(guide, /并入外部仓库/);
   assert.match(guide, /HamsterArchiver\.exe/);
-  assert.match(manualUpdateInstructions('en-US'), /Import the warehouse archive/i);
+  assert.doesNotMatch(guide, /复制.*userdata/i);
+  const englishGuide = manualUpdateInstructions('en-US');
+  assert.match(englishGuide, /Import external warehouse/i);
+  assert.doesNotMatch(englishGuide, /copy.*userdata/i);
 });
 
 test('Windows updater completes a real PowerShell handshake and writes failure diagnostics', {

@@ -14,6 +14,43 @@ async function pathExists(targetPath) {
   }
 }
 
+async function prepareUserDataTarget(currentRoot, targetRoot) {
+  const current = path.resolve(String(currentRoot || ''));
+  const target = path.resolve(String(targetRoot || ''));
+  if (path.parse(target).root === target) throw new Error('不能把磁盘根目录设为用户数据区。');
+  if (normalizeForComparison(current) === normalizeForComparison(target)) {
+    return { mode: 'current', target };
+  }
+  const relativeTarget = path.relative(current, target);
+  const relativeCurrent = path.relative(target, current);
+  const isInside = (relative) => relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+  if (isInside(relativeTarget) || isInside(relativeCurrent)) {
+    throw new Error('新旧用户数据区不能互相包含。');
+  }
+
+  await fs.mkdir(target, { recursive: true });
+  const targetEntries = await fs.readdir(target);
+  if (targetEntries.length > 0) {
+    const recognized = await pathExists(path.join(target, 'config', 'settings.json')) ||
+      await pathExists(path.join(target, 'warehouse', 'warehouse.sqlite'));
+    if (!recognized) {
+      throw new Error('所选目录不是空目录，也没有找到可识别的 Hamster Archiver 用户数据。');
+    }
+    return { mode: 'existing', target };
+  }
+
+  const skipped = new Set(['electron', 'updates']);
+  for (const entry of await fs.readdir(current, { withFileTypes: true })) {
+    if (skipped.has(entry.name)) continue;
+    await fs.cp(path.join(current, entry.name), path.join(target, entry.name), {
+      recursive: true,
+      force: false,
+      errorOnExist: true
+    });
+  }
+  return { mode: 'copied', target };
+}
+
 async function copyPathIfMissing(sourcePath, targetPath) {
   if (!(await pathExists(sourcePath)) || await pathExists(targetPath)) return false;
   await fs.mkdir(path.dirname(targetPath), { recursive: true });
@@ -126,4 +163,10 @@ async function migrateToUserData(config, workspaceRoot, layout) {
   return changed;
 }
 
-module.exports = { copyPathIfMissing, migrateToUserData, movePathIfMissing, pathExists };
+module.exports = {
+  copyPathIfMissing,
+  migrateToUserData,
+  movePathIfMissing,
+  pathExists,
+  prepareUserDataTarget
+};

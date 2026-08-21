@@ -10,7 +10,7 @@ Local-first batch archiver and searchable media vault for Windows.
 
 Local-first · Batch archiving · Media previews · Portable user data
 
-![Version](https://img.shields.io/badge/version-4.4.9-d45f3c?style=flat-square)
+![Version](https://img.shields.io/badge/version-4.5.0-d45f3c?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-23211d?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-2f7558?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-43-456f83?style=flat-square)
@@ -74,7 +74,7 @@ The application includes Daylight and Night themes plus a “⇄ EN / ⇄ 中文
 2. Extract the complete directory and run `HamsterArchiver.exe`.
 3. Choose the source directory and archive output directory, scan and confirm the queue, then start archiving.
 
-Keep the release directory structure intact. Electron, 7-Zip, FFmpeg and `userdata` use relative paths. Moving the complete application directory to another drive keeps the portable tool paths valid.
+Keep the release directory structure intact. Electron, 7-Zip and FFmpeg depend on the complete release directory. The user data area defaults to the adjacent `userdata` directory and can be safely copied or switched under More settings.
 
 ### Manual update when automatic update fails
 
@@ -82,11 +82,10 @@ If the application reports that automatic update did not finish, the old version
 
 Update checks use the public release channel, while source code and development commits are kept in a private repository. Version 4.2.0 can discover and verify a newer Release, but its built-in updater copies the new `resources` directory into a nested path. Startup validation therefore still reads version 4.2.0 and rolls back. Upgrading from 4.2.0 requires the manual steps below. After that one manual upgrade, the fixed updater replaces backed-up program directories before startup validation and always excludes the existing `userdata` directory.
 
-1. Export the warehouse once from the old version as a safety copy, then exit the application completely.
+1. Use Export warehouse in the old version to create a warehouse ZIP, then exit the application completely.
 2. Download the latest Windows x64 ZIP from [Releases](../../releases) and extract it into a **new directory**. Do not replace only the EXE or overwrite a directory that is still running.
-3. With both versions closed, copy the complete `userdata` directory from the old version into the new version, replacing the new empty `userdata`.
-4. Run `HamsterArchiver.exe` from the new directory. Verify the version, warehouse records and thumbnails before deleting the old directory.
-5. If the copied `userdata` cannot be read, keep the old directory and use Import external warehouse in the new version with the archive exported in step 1.
+3. Run `HamsterArchiver.exe` from the new directory, choose Import external warehouse, and select the ZIP exported in step 1.
+4. Verify the version, warehouse records and thumbnails. Keep the old program directory until the imported warehouse has been checked.
 
 The main application now exits only after the independent updater confirms that it has started. A launch failure keeps the current version open and displays these manual steps. A replacement or startup-validation failure rolls the program files back and reports the reason and diagnostics directory when the old version reopens.
 
@@ -108,7 +107,7 @@ The source repository does not contain the large `ffmpeg.exe` binary. Put FFmpeg
 ## Portable data layout
 
 ```text
-HamsterArchiver-v4.4.9-win-x64/
+HamsterArchiver-v4.5.0-win-x64/
 ├─ HamsterArchiver.exe
 ├─ tools/
 │  ├─ 7zip/
@@ -124,7 +123,7 @@ HamsterArchiver-v4.4.9-win-x64/
 
 The staging directory is created beside the selected output directory, for example `D:\packed-staging`, to reduce cross-disk transfers. Source and output directories are user choices and are not part of the source repository.
 
-`userdata` may contain passwords, file paths, thumbnails and warehouse indexes. It is ignored by Git and never included in a public snapshot. Exit the application before copying the complete directory to another device.
+The user data area may contain passwords, file paths, thumbnails and warehouse indexes. It is ignored by Git and never included in a public snapshot. Choosing an empty new location copies durable data while retaining the old directory; choosing recognized existing data switches to it without merging warehouses.
 
 ## Technology and boundaries
 

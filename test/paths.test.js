@@ -118,9 +118,11 @@ test('portable tools remain relative and owned user-data paths rebase after movi
     repositoryDirectory: 'D:\\old-app\\userdata\\warehouse',
     processedSourceDirectory: 'D:\\old-app\\userdata\\processed',
     similarityIgnoreTermsPath: 'D:\\old-app\\userdata\\config\\similarity-ignore-terms.txt',
+    archiveStagingDirectory: 'D:\\old-app\\userdata\\staging',
     intakeDirectory: 'F:\\my-input'
   }, { root: 'E:\\new-app\\userdata' });
   assert.equal(config.repositoryDirectory, path.resolve('E:\\new-app\\userdata', 'warehouse'));
+  assert.equal(config.archiveStagingDirectory, path.resolve('E:\\new-app\\userdata', 'staging'));
   assert.equal(config.migratedRepositoryFrom, 'D:\\old-app\\userdata\\warehouse');
   assert.equal(config.intakeDirectory, 'F:\\my-input');
 });

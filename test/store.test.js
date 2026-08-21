@@ -5,8 +5,9 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { similarityCandidateKeys } = require('../src/core/duplicate-check');
 const { AppStore, readJson, writeJsonAtomic } = require('../src/core/store');
-const { makeUserDataLayout } = require('../src/core/storage-paths');
+const { makeUserDataLayout, resolveUserDataRoot } = require('../src/core/storage-paths');
 
 test('JSON state can be atomically created and replaced', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-store-'));
@@ -53,6 +54,12 @@ test('SQLite repository persists catalog, jobs and pending manifests incremental
   assert.equal(afterSubsetUpdate.find((item) => item.id === 'record-two').backupLocation, '移动硬盘 B');
   await store.deletePendingManifest(repositoryDirectory, job.id);
   assert.equal(await store.loadPendingManifest(repositoryDirectory, job.id), null);
+  const similarityKeys = similarityCandidateKeys(record, []);
+  assert.deepEqual(store.findCatalogIdsBySimilarityKeys(repositoryDirectory, similarityKeys), ['record-one']);
+  await store.saveCatalog(repositoryDirectory, []);
+  assert.deepEqual(store.findCatalogIdsBySimilarityKeys(repositoryDirectory, similarityKeys), []);
+  assert.deepEqual(store.findCatalogIdsByExactName(repositoryDirectory, '测试库存'), []);
+  assert.equal(store.findExactFileMatches(repositoryDirectory, record.manifest).length, 0);
   store.closeAll();
 });
 
@@ -73,4 +80,19 @@ test('user data layout keeps settings, warehouse and one log under one root', as
   const lines = (await fs.readFile(layout.logPath, 'utf8')).trim().split('\n');
   assert.equal(lines.length, 2);
   assert.equal((await fs.readdir(path.join(root, 'first-warehouse')).catch(() => [])).length, 0);
+});
+
+test('saved user data location becomes the root for every durable data path', () => {
+  const applicationRoot = path.resolve('E:\\HamsterArchiver');
+  const selectedRoot = path.resolve('D:\\HamsterData');
+  const resolved = resolveUserDataRoot(applicationRoot, () => JSON.stringify({
+    userDataDirectory: selectedRoot
+  }));
+  const layout = makeUserDataLayout(applicationRoot, null, resolved);
+
+  assert.equal(resolved, selectedRoot);
+  assert.equal(layout.root, selectedRoot);
+  assert.equal(layout.settingsPath, path.join(selectedRoot, 'config', 'settings.json'));
+  assert.equal(layout.repositoryDirectory, path.join(selectedRoot, 'warehouse'));
+  assert.equal(resolveUserDataRoot(applicationRoot, () => '{bad json'), path.join(applicationRoot, 'userdata'));
 });

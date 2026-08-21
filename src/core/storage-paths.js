@@ -1,10 +1,35 @@
 'use strict';
 
+const fs = require('node:fs');
 const path = require('node:path');
 
-function makeUserDataLayout(applicationRoot, legacyElectronUserDataRoot = null) {
+const USER_DATA_LOCATION_FILENAME = 'user-data-location.json';
+
+function userDataLocationPath(applicationRoot) {
   if (!applicationRoot) throw new Error('软件主目录不能为空。');
-  const root = path.join(path.resolve(applicationRoot), 'userdata');
+  return path.join(path.resolve(applicationRoot), USER_DATA_LOCATION_FILENAME);
+}
+
+function resolveUserDataRoot(applicationRoot, readFileSync = fs.readFileSync) {
+  const resolvedApplicationRoot = path.resolve(applicationRoot);
+  const defaultRoot = path.join(resolvedApplicationRoot, 'userdata');
+  try {
+    const saved = JSON.parse(readFileSync(userDataLocationPath(resolvedApplicationRoot), 'utf8'));
+    const configured = String(saved?.userDataDirectory || '').trim();
+    if (!configured) return defaultRoot;
+    const resolved = path.isAbsolute(configured)
+      ? path.resolve(configured)
+      : path.resolve(resolvedApplicationRoot, configured);
+    return path.parse(resolved).root === resolved ? defaultRoot : resolved;
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error instanceof SyntaxError) return defaultRoot;
+    throw error;
+  }
+}
+
+function makeUserDataLayout(applicationRoot, legacyElectronUserDataRoot = null, userDataRoot = null) {
+  if (!applicationRoot) throw new Error('软件主目录不能为空。');
+  const root = path.resolve(userDataRoot || path.join(path.resolve(applicationRoot), 'userdata'));
   const configDirectory = path.join(root, 'config');
   const logDirectory = path.join(root, 'logs');
   return {
@@ -23,4 +48,9 @@ function makeUserDataLayout(applicationRoot, legacyElectronUserDataRoot = null) 
   };
 }
 
-module.exports = { makeUserDataLayout };
+module.exports = {
+  USER_DATA_LOCATION_FILENAME,
+  makeUserDataLayout,
+  resolveUserDataRoot,
+  userDataLocationPath
+};

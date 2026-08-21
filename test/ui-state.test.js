@@ -36,3 +36,20 @@ test('queue scan actions stay grouped and right-aligned', () => {
   assert.match(actionGroup[1], /id="add-folder"[\s\S]*id="add-video"[\s\S]*id="scan-source"/);
   assert.match(styles, /\.queue-title \.queue-actions\s*\{[^}]*justify-content:\s*flex-end;/s);
 });
+
+test('maintenance paths are selectable and usage guide is the final footer action', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'index.html'), 'utf8');
+
+  assert.match(html, /id="select-user-data"[^>]*>选择<\/button>/);
+  assert.match(html, /id="archive-staging-directory"[^>]*><button data-pick="archive-staging-directory"/);
+  assert.match(html, /欢迎反馈<\/button>[\s\S]*id="open-usage-guide"[^>]*>使用说明<\/button>[\s\S]*<\/footer>/);
+});
+
+test('run history keeps log messages in the list instead of duplicating the latest message in the header', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'app.js'), 'utf8');
+
+  assert.doesNotMatch(html, /id="digest-log"/);
+  assert.doesNotMatch(app, /digest\.textContent\s*=\s*`\$\{latestTime\}/);
+  assert.match(app, /for \(const entry of \[\.\.\.logs\]\.reverse\(\)\)/);
+});

@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld('archiveApp', {
   exportWarehouse: () => ipcRenderer.invoke('warehouse:export'),
   importWarehouse: () => ipcRenderer.invoke('warehouse:import'),
   checkForUpdates: (options = {}) => ipcRenderer.invoke('app:check-for-updates', options),
-  openUserData: () => ipcRenderer.invoke('user-data:open'),
+  changeUserDataLocation: () => ipcRenderer.invoke('user-data:change-location'),
   openSimilarityIgnoreTerms: () => ipcRenderer.invoke('similarity:open-ignore-terms'),
   reloadSimilarityIgnoreTerms: () => ipcRenderer.invoke('similarity:reload-ignore-terms'),
   openExternal: (url) => ipcRenderer.invoke('system:open-external', url),

@@ -183,12 +183,11 @@
                 </div>
                 <div class="ignore-terms-setting advanced-option-setting"><div><strong>相似度排除词表</strong><small>也就是相似判断的“白名单”。每行一个词；不影响仓库搜索、MD5 或文件大小重复检查。</small></div><div class="ignore-terms-actions"><button id="open-similarity-ignore-terms" class="button ghost" type="button">打开词表</button><button id="reload-similarity-ignore-terms" class="button ghost" type="button">重新载入</button></div></div>
                 <div class="advanced-paths">
-                  <label class="path-field advanced-path-field"><span>用户数据区</span><div><input id="user-data-path" type="text" readonly><button id="open-user-data" type="button">打开</button></div><small>集中保存设置、仓库数据库、缩略图、暂存文件和当前用户的一份运行日志</small></label>
-                  <label class="path-field advanced-path-field"><span>压缩暂存目录</span><div><input id="archive-staging-directory" type="text" readonly></div><small>默认在打包存放点同目录下新建一个 staging 文件夹，目录不存在时自动创建</small></label>
+                  <label class="path-field advanced-path-field"><span>用户数据区</span><div><input id="user-data-path" type="text" readonly><button id="select-user-data" type="button">选择</button></div><small>集中保存设置、仓库数据库、缩略图、已处理文件和当前用户的一份运行日志；切换时保留旧目录</small></label>
+                  <label class="path-field advanced-path-field"><span>压缩暂存目录</span><div><input id="archive-staging-directory" type="text"><button data-pick="archive-staging-directory" type="button">选择</button></div><small>默认在打包存放点同目录下新建 staging 文件夹，也可选择其他安全位置</small></label>
                 </div>
                 <div class="settings-utility-actions">
                   <button id="save-settings" class="button primary">保存设置</button>
-                  <button id="open-usage-guide" class="button ghost" type="button">使用说明</button>
                 </div>
               </div>
             </details>
@@ -235,7 +234,7 @@
 
           <section class="panel log-panel">
             <details class="settings-group log-group" open>
-              <summary class="group-head"><span class="group-title">03 · 运行记录</span><span id="digest-log" class="group-digest">暂无日志</span><span id="running-indicator" class="running-indicator">空闲</span><span class="group-chevron" aria-hidden="true">⌄</span></summary>
+              <summary class="group-head"><span class="group-title">03 · 运行记录</span><span id="running-indicator" class="running-indicator">空闲</span><span class="group-chevron" aria-hidden="true">⌄</span></summary>
               <div class="group-body"><div id="log-list" class="log-list"><p class="muted">暂无日志</p></div></div>
             </details>
           </section>
@@ -356,6 +355,8 @@
       <button class="footer-link" type="button" data-external-url="https://github.com/CarlosZ16420/hamster-archiver">GitHub 仓库</button>
       <i aria-hidden="true">·</i>
       <button class="footer-link" type="button" data-external-url="https://github.com/CarlosZ16420/hamster-archiver/issues">欢迎反馈</button>
+      <i aria-hidden="true">·</i>
+      <button id="open-usage-guide" class="footer-link" type="button">使用说明</button>
     </span>
   </footer>
 

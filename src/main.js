@@ -4,18 +4,24 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
 const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, net, shell } = require('electron');
-const { AppStore } = require('./core/store');
+const { AppStore, writeJsonAtomic } = require('./core/store');
 const { QueueManager } = require('./core/queue-manager');
 const {
   makeArchiveStagingDirectory,
   makeDefaultConfig,
+  normalizeForComparison,
   normalizePortableProgramPath,
   PORTABLE_FFMPEG_PATH,
   PORTABLE_SEVEN_ZIP_PATH,
   rebasePortableUserDataPaths,
   resolveApplicationPath
 } = require('./core/paths');
-const { makeUserDataLayout } = require('./core/storage-paths');
+const {
+  makeUserDataLayout,
+  resolveUserDataRoot,
+  userDataLocationPath
+} = require('./core/storage-paths');
+const { prepareUserDataTarget } = require('./core/storage-migration');
 const { IMAGE_EXTENSIONS, LARGE_TASK_BYTES, isVideoFile } = require('./core/constants');
 const { extractVideoFrames } = require('./core/media-service');
 const { checkForUpdates } = require('./core/update-checker');
@@ -51,9 +57,10 @@ if (isSmokeTest) {
 const applicationRoot = isSmokeTest && process.env.HAMSTER_SMOKE_USER_DATA_DIR
   ? path.join(path.resolve(process.env.HAMSTER_SMOKE_USER_DATA_DIR), 'portable-root')
   : app.isPackaged ? path.dirname(app.getPath('exe')) : path.resolve(__dirname, '..');
+const configuredUserDataRoot = resolveUserDataRoot(applicationRoot);
 const electronRuntimeDirectory = isSmokeTest && process.env.HAMSTER_SMOKE_USER_DATA_DIR
   ? path.resolve(process.env.HAMSTER_SMOKE_USER_DATA_DIR)
-  : path.join(applicationRoot, 'userdata', 'electron');
+  : path.join(configuredUserDataRoot, 'electron');
 app.setPath('userData', electronRuntimeDirectory);
 if (isSmokeTest) {
   app.disableHardwareAcceleration();
@@ -295,7 +302,7 @@ function createWindow() {
     mainWindow.webContents.once('did-finish-load', async () => {
       const bridgeStatus = await mainWindow.webContents.executeJavaScript(`(() => {
         const required = [
-          'getState', 'chooseDirectory', 'chooseProgram', 'changeWarehouseLocation', 'openWarehouse', 'exportWarehouse', 'importWarehouse', 'checkForUpdates', 'openUserData', 'openExternal', 'copyText', 'chooseSingle', 'saveConfig', 'scanSource',
+          'getState', 'chooseDirectory', 'chooseProgram', 'changeWarehouseLocation', 'openWarehouse', 'exportWarehouse', 'importWarehouse', 'checkForUpdates', 'changeUserDataLocation', 'openExternal', 'copyText', 'chooseSingle', 'saveConfig', 'scanSource',
           'addSingle', 'openTaskSource', 'getDroppedPath', 'confirmTask', 'confirmAnomaly', 'acknowledgeTrashSafety', 'cancelTask', 'retryTask', 'startQueue', 'startInventoryOnlyQueue',
     'discardAnomaly', 'pauseQueue', 'resumeQueue', 'removeJobs', 'clearCompletedJobs', 'clearCancelledJobs', 'clearQueue', 'clearPotentialDuplicates', 'clearExactDuplicates', 'confirmAllDuplicates', 'finishNextAndPause', 'searchCatalog',
           'getCatalogSuggestions', 'openSimilarityIgnoreTerms', 'reloadSimilarityIgnoreTerms',
@@ -532,8 +539,8 @@ function createWindow() {
             document.querySelector('#set-warehouse-location') && document.querySelector('#open-warehouse')),
           hasNoTreeBulkButtons: !document.querySelector('#expand-library-tree') && !document.querySelector('#collapse-library-tree'),
           hasNoDailyReview: !document.querySelector('#daily-review'),
-          stagingIsDerived: Boolean(document.querySelector('#archive-staging-directory[readonly]') &&
-            !document.querySelector('[data-pick="archive-staging-directory"]')),
+          stagingCanBeSelected: Boolean(!document.querySelector('#archive-staging-directory[readonly]') &&
+            document.querySelector('[data-pick="archive-staging-directory"]')),
           hasCollapsibleMedia: Boolean(document.querySelector('details.media-preview-section')),
           passwordHidden: document.querySelector('#archive-password')?.type === 'password',
           inlineBulkTagRemoved: !document.querySelector('#bulk-catalog-tags'),
@@ -564,7 +571,7 @@ function createWindow() {
             !libraryStatus.hasNewControls || !libraryStatus.passwordHidden || !libraryStatus.inlineBulkTagRemoved ||
             !libraryStatus.bulkPasswordRemoved || !libraryStatus.passwordEditorReadOnly ||
             !libraryStatus.hasNoTreeBulkButtons || !libraryStatus.hasNoDailyReview ||
-            !libraryStatus.stagingIsDerived || !libraryStatus.hasCollapsibleMedia ||
+            !libraryStatus.stagingCanBeSelected || !libraryStatus.hasCollapsibleMedia ||
             (Number(process.env.HAMSTER_SMOKE_CATALOG_COUNT || 0) > 24 && !libraryStatus.paginationVisible) ||
             !manualDialogStatus.open || !manualDialogStatus.nameRequired || !manualDialogStatus.notesRequired ||
             activityStatus.cells !== 112 || Number(activityStatus.inventory) < 2 ||
@@ -793,13 +800,52 @@ function registerIpc() {
     return result;
   });
 
-  ipcMain.handle('user-data:open', async (event) => {
+  ipcMain.handle('user-data:change-location', async (event) => {
     assertTrustedSender(event);
-    const userDataDirectory = path.resolve(queueManager.config.userDataDirectory);
-    await fs.mkdir(userDataDirectory, { recursive: true });
-    const message = await shell.openPath(userDataDirectory);
-    if (message) throw new Error(`无法打开用户数据区：${message}`);
-    return true;
+    if (queueManager.running) throw new Error('队列运行期间不能修改用户数据区。');
+    const currentRoot = path.resolve(queueManager.config.userDataDirectory);
+    const selected = await dialog.showOpenDialog(mainWindow, {
+      title: '选择用户数据区',
+      defaultPath: currentRoot,
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (selected.canceled) return null;
+    const targetRoot = path.resolve(selected.filePaths[0]);
+    if (normalizeForComparison(targetRoot) === normalizeForComparison(currentRoot)) {
+      return { path: currentRoot, mode: 'current', restarting: false };
+    }
+
+    const confirmation = await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: '切换用户数据区',
+      message: '应用需要重启后才能切换用户数据区。',
+      detail: [
+        `当前位置：${currentRoot}`,
+        `新位置：${targetRoot}`,
+        '',
+        '如果新位置是空目录，设置、仓库数据库、缩略图、日志和已处理文件会复制过去；旧目录不会删除。',
+        '如果新位置已经包含 Hamster Archiver 用户数据，将直接使用其中的数据，不会与当前仓库合并。'
+      ].join('\n'),
+      buttons: ['复制或切换并重启', '取消'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true
+    });
+    if (confirmation.response !== 0) return null;
+
+    await appStore.saveSettings(queueManager.config);
+    await appStore.checkpoint(queueManager.config.repositoryDirectory);
+    appStore.closeAll();
+    const prepared = await prepareUserDataTarget(currentRoot, targetRoot);
+    await writeJsonAtomic(userDataLocationPath(applicationRoot), {
+      version: 1,
+      userDataDirectory: prepared.target,
+      savedAt: new Date().toISOString()
+    });
+    app.relaunch();
+    allowWindowClose = true;
+    app.quit();
+    return { path: prepared.target, mode: prepared.mode, restarting: true };
   });
 
   ipcMain.handle('similarity:open-ignore-terms', async (event) => {
@@ -1080,7 +1126,7 @@ function registerIpc() {
 
 if (hasSingleInstanceLock) app.whenReady().then(async () => {
   const workspaceRoot = applicationRoot;
-  const userDataLayout = makeUserDataLayout(workspaceRoot);
+  const userDataLayout = makeUserDataLayout(workspaceRoot, null, configuredUserDataRoot);
   const store = new AppStore(userDataLayout);
   appStore = store;
   const config = rebasePortableUserDataPaths(
@@ -1104,7 +1150,9 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     config.autoTrashCompleted = process.env.HAMSTER_SMOKE_SOURCE_DISPOSITION === 'trash';
     config.moveCompleted = process.env.HAMSTER_SMOKE_SOURCE_DISPOSITION === 'move';
   }
-  config.archiveStagingDirectory = makeArchiveStagingDirectory(config.archiveOutputDirectory);
+  if (!config.archiveStagingDirectory) {
+    config.archiveStagingDirectory = makeArchiveStagingDirectory(config.archiveOutputDirectory);
+  }
   for (const directory of [config.repositoryDirectory].filter(Boolean)) {
     await fs.mkdir(directory, { recursive: true });
   }

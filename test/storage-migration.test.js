@@ -5,7 +5,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { migrateToUserData } = require('../src/core/storage-migration');
+const { migrateToUserData, prepareUserDataTarget } = require('../src/core/storage-migration');
 const { makeUserDataLayout } = require('../src/core/storage-paths');
 
 test('portable storage migration moves legacy data under the application root and merges the user log once', async (t) => {
@@ -52,4 +52,45 @@ test('portable storage migration moves legacy data under the application root an
   await assert.rejects(fs.access(oldProcessed), /ENOENT/);
   assert.equal((firstMergedLog.match(/legacy-log/g) || []).length, 1);
   assert.equal(await fs.readFile(layout.logPath, 'utf8'), firstMergedLog);
+});
+
+test('choosing an empty user data area copies durable data but keeps the old area intact', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-user-data-switch-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const current = path.join(root, 'current');
+  const target = path.join(root, 'target');
+  await fs.mkdir(path.join(current, 'config'), { recursive: true });
+  await fs.mkdir(path.join(current, 'warehouse'), { recursive: true });
+  await fs.mkdir(path.join(current, 'electron'), { recursive: true });
+  await fs.mkdir(path.join(current, 'updates'), { recursive: true });
+  await fs.mkdir(target, { recursive: true });
+  await fs.writeFile(path.join(current, 'config', 'settings.json'), '{"version":1}');
+  await fs.writeFile(path.join(current, 'warehouse', 'warehouse.sqlite'), 'database');
+  await fs.writeFile(path.join(current, 'electron', 'cache.bin'), 'cache');
+  await fs.writeFile(path.join(current, 'updates', 'package.zip'), 'temporary');
+
+  const result = await prepareUserDataTarget(current, target);
+
+  assert.equal(result.mode, 'copied');
+  assert.equal(await fs.readFile(path.join(target, 'config', 'settings.json'), 'utf8'), '{"version":1}');
+  assert.equal(await fs.readFile(path.join(target, 'warehouse', 'warehouse.sqlite'), 'utf8'), 'database');
+  await assert.rejects(fs.access(path.join(target, 'electron')), /ENOENT/);
+  await assert.rejects(fs.access(path.join(target, 'updates')), /ENOENT/);
+  assert.equal(await fs.readFile(path.join(current, 'warehouse', 'warehouse.sqlite'), 'utf8'), 'database');
+});
+
+test('user data switching accepts recognized existing data and rejects unsafe nesting', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-user-data-existing-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const current = path.join(root, 'current');
+  const existing = path.join(root, 'existing');
+  await fs.mkdir(path.join(current, 'config'), { recursive: true });
+  await fs.mkdir(path.join(existing, 'config'), { recursive: true });
+  await fs.writeFile(path.join(existing, 'config', 'settings.json'), '{}');
+
+  assert.equal((await prepareUserDataTarget(current, existing)).mode, 'existing');
+  await assert.rejects(
+    prepareUserDataTarget(current, path.join(current, 'nested')),
+    /不能互相包含/
+  );
 });

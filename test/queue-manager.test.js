@@ -17,7 +17,7 @@ class FakeStore {
   async loadCatalog() { return []; }
   async saveJobs(_library, jobs) { this.jobs = structuredClone(jobs); }
   async saveCatalog() {}
-  async saveSettings() {}
+  async saveSettings(settings) { this.settings = structuredClone(settings); }
   async appendLog() {}
   async loadPendingManifest(_library, jobId) { return this.pendingManifests.get(jobId) || null; }
   async savePendingManifest(_library, jobId, manifest) { this.pendingManifests.set(jobId, structuredClone(manifest)); }
@@ -148,6 +148,59 @@ test('completed tasks can be cleared without touching active or failed tasks', a
   const result = await manager.clearCompletedJobs();
   assert.equal(result.removedCount, 2);
   assert.deepEqual(manager.jobs.map((job) => job.id), ['failed']);
+});
+
+test('compressing an uncompressed catalog record ignores its completed intake job', () => {
+  const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' });
+  manager.catalog = [{
+    id: 'uncompressed-record', title: '同一个项目', displayName: '同一个项目',
+    archiveState: 'uncompressed', tags: ['未压缩'], manifest: [], directories: []
+  }];
+  manager.jobs = [{
+    ...queuedJob('original-intake'),
+    displayName: '同一个项目',
+    status: 'completed'
+  }];
+
+  const upgrade = manager.createJob({
+    sourceCatalogRecordId: 'uncompressed-record',
+    sourcePath: 'E:\\source\\same-item',
+    sourceType: 'directory',
+    displayName: '同一个项目',
+    fileCount: 1,
+    totalBytes: 10,
+    processingMode: 'archive_existing'
+  });
+
+  assert.deepEqual(upgrade.nameDuplicateMatches, []);
+  assert.deepEqual(upgrade.similarMatches, []);
+  assert.equal(upgrade.status, 'queued');
+});
+
+test('deleted catalog history cannot mark a new task as duplicate', async () => {
+  const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' });
+  manager.catalog = [{
+    id: 'deleted-record', recordType: 'manual', title: '已经删除的项目', displayName: '已经删除的项目',
+    notes: '测试', tags: [], rating: 0, manifest: [], directories: []
+  }];
+  manager.jobs = [{
+    ...queuedJob('deleted-record-job'),
+    displayName: '已经删除的项目',
+    status: 'completed'
+  }];
+
+  await manager.deleteCatalogRecords(['deleted-record']);
+  const replacement = manager.createJob({
+    sourcePath: 'E:\\source\\replacement',
+    sourceType: 'directory',
+    displayName: '已经删除的项目',
+    fileCount: 1,
+    totalBytes: 10
+  });
+
+  assert.deepEqual(replacement.nameDuplicateMatches, []);
+  assert.deepEqual(replacement.similarMatches, []);
+  assert.equal(replacement.status, 'queued');
 });
 
 test('cancelled tasks can be cleared without touching failed or queued tasks', async () => {
@@ -355,6 +408,30 @@ test('thumbnail limit is configurable within a bounded range', async () => {
   await manager.updateConfig({ thumbnailLimit: 250 });
   assert.equal(manager.config.thumbnailLimit, 250);
   await assert.rejects(manager.updateConfig({ thumbnailLimit: 501 }), /1—500/);
+});
+
+test('custom archive staging directory is saved instead of being overwritten by the output path', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-custom-staging-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new FakeStore();
+  const manager = new QueueManager(store, {
+    archiveOutputDirectory: path.join(root, 'output'),
+    archiveStagingDirectory: path.join(root, 'output-staging'),
+    repositoryDirectory: path.join(root, 'warehouse'),
+    moveCompleted: false
+  });
+  const customStaging = path.join(root, 'fast-disk-staging');
+
+  await manager.updateConfig({
+    archiveOutputDirectory: path.join(root, 'new-output'),
+    archiveStagingDirectory: customStaging,
+    moveCompleted: false,
+    autoTrashCompleted: false
+  });
+
+  assert.equal(manager.config.archiveStagingDirectory, customStaging);
+  assert.equal(store.settings.archiveStagingDirectory, customStaging);
+  assert.equal((await fs.stat(customStaging)).isDirectory(), true);
 });
 
 test('disabled small-item filtering accepts tiny folders before output setup', async (t) => {

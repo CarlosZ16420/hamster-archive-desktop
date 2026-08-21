@@ -537,7 +537,7 @@ function readConfig() {
   return {
     language: i18n?.getLocale?.() === 'en-US' ? 'en-US' : 'zh-CN',
     intakeDirectory: elements.intakeDirectory.value.trim(),
-    archiveStagingDirectory: deriveStagingDirectory(elements.archiveOutputDirectory.value),
+    archiveStagingDirectory: elements.archiveStagingDirectory.value.trim(),
     archiveOutputDirectory: elements.archiveOutputDirectory.value.trim(),
     moveCompleted: elements.moveCompleted.checked,
     processedSourceDirectory: elements.processedSourceDirectory.value.trim(),
@@ -671,7 +671,8 @@ function renderConfig(config) {
   updateLanguageToggle(config.language === 'en-US' ? 'en-US' : 'zh-CN');
   elements.intakeDirectory.value = config.intakeDirectory || '';
   elements.archiveOutputDirectory.value = config.archiveOutputDirectory || '';
-  elements.archiveStagingDirectory.value = deriveStagingDirectory(config.archiveOutputDirectory);
+  elements.archiveStagingDirectory.value = config.archiveStagingDirectory ||
+    deriveStagingDirectory(config.archiveOutputDirectory);
   elements.warehousePath.textContent = config.repositoryDirectory ? t(`仓库：${config.repositoryDirectory}`) : '';
   elements.warehousePath.title = config.repositoryDirectory || t('当前仓库位置');
   elements.userDataPath.value = config.userDataDirectory || '';
@@ -839,15 +840,10 @@ function renderJobs(jobs) {
 
 function renderLogs(logs) {
   elements.logList.replaceChildren();
-  const digest = document.querySelector('#digest-log');
   if (logs.length === 0) {
-    digest.textContent = t('暂无日志');
     elements.logList.append(make('p', 'muted', '暂无日志'));
     return;
   }
-  const latest = logs[logs.length - 1];
-  const latestTime = new Date(latest.at).toLocaleTimeString('zh-CN', { hour12: false });
-  digest.textContent = `${latestTime} · ${t(latest.message)}`;
   for (const entry of [...logs].reverse()) {
     const row = make('div', `log-entry ${entry.level}`);
     const time = new Date(entry.at);
@@ -2007,19 +2003,22 @@ setInterval(() => {
 document.querySelectorAll('[data-pick]').forEach((button) => {
   button.addEventListener('click', async () => {
     const input = document.querySelector(`#${button.dataset.pick}`);
+    const previousValue = input.value.trim();
+    const previousDerivedStaging = input === elements.archiveOutputDirectory
+      ? deriveStagingDirectory(previousValue)
+      : '';
     const selected = await safely(() => window.archiveApp.chooseDirectory(input.value.trim()));
     if (!selected) return;
     input.value = selected;
-    if (input === elements.archiveOutputDirectory) {
+    if (input === elements.archiveOutputDirectory &&
+        (!elements.archiveStagingDirectory.value.trim() ||
+          elements.archiveStagingDirectory.value.trim() === previousDerivedStaging)) {
       elements.archiveStagingDirectory.value = deriveStagingDirectory(selected);
     }
     await saveConfig();
   });
 });
 
-elements.archiveOutputDirectory.addEventListener('input', () => {
-  elements.archiveStagingDirectory.value = deriveStagingDirectory(elements.archiveOutputDirectory.value);
-});
 document.querySelector('.settings-col').addEventListener('input', updateSettingsDigests);
 document.querySelector('.settings-col').addEventListener('change', updateSettingsDigests);
 
@@ -2094,9 +2093,10 @@ elements.volumeUnit.addEventListener('change', () => {
   updateVolumeControls({ unitChanged: true });
   void saveConfig();
 });
-document.querySelector('#open-user-data').addEventListener('click', async () => {
-  const opened = await safely(() => window.archiveApp.openUserData());
-  if (opened) showToast('已打开用户数据区');
+document.querySelector('#select-user-data').addEventListener('click', async () => {
+  const saved = await saveConfig();
+  if (!saved) return;
+  await safely(() => window.archiveApp.changeUserDataLocation());
 });
 
 document.querySelector('#scan-source').addEventListener('click', async () => {

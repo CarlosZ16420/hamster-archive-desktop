@@ -43,6 +43,12 @@ const { PauseController } = require('./process-controller');
 const SIMILARITY_VERSION = 3;
 const execFileAsync = promisify(execFile);
 
+function isDuplicateCandidateJob(job) {
+  const status = String(job?.status || '');
+  return Boolean(status) && status !== 'cancelled' && status !== 'failed' &&
+    !status.startsWith('completed');
+}
+
 function normalizeCatalogMetadata(record) {
   record = record && typeof record === 'object' ? record : {};
   const inventoryDate = record.inventoryDate || record.completedAt || record.verifiedAt || new Date().toISOString();
@@ -1507,9 +1513,25 @@ class QueueManager extends EventEmitter {
     ).trim();
     if (moveCompleted && !processedSourceDirectory) throw new Error('请填写归档后移动位置。');
     const previousRepositoryDirectory = this.config.repositoryDirectory;
+    const previousArchiveOutputDirectory = String(this.config.archiveOutputDirectory || '').trim();
     const archiveOutputDirectory = String(
       config.archiveOutputDirectory ?? this.config.archiveOutputDirectory ?? ''
     ).trim();
+    const hasArchiveOutputDirectory = Object.prototype.hasOwnProperty.call(config, 'archiveOutputDirectory');
+    const hasArchiveStagingDirectory = Object.prototype.hasOwnProperty.call(config, 'archiveStagingDirectory');
+    let archiveStagingDirectory = String(
+      config.archiveStagingDirectory ?? this.config.archiveStagingDirectory ?? ''
+    ).trim();
+    if (!hasArchiveStagingDirectory && hasArchiveOutputDirectory) {
+      const previousDerived = makeArchiveStagingDirectory(previousArchiveOutputDirectory);
+      if (!archiveStagingDirectory ||
+          normalizeForComparison(archiveStagingDirectory) === normalizeForComparison(previousDerived)) {
+        archiveStagingDirectory = makeArchiveStagingDirectory(archiveOutputDirectory);
+      }
+    }
+    if (hasArchiveOutputDirectory && archiveOutputDirectory && !archiveStagingDirectory) {
+      archiveStagingDirectory = makeArchiveStagingDirectory(archiveOutputDirectory);
+    }
     this.config = {
       ...this.config,
       ...config,
@@ -1530,12 +1552,10 @@ class QueueManager extends EventEmitter {
       customArchiveName,
       moveCompleted,
       autoTrashCompleted,
-      processedSourceDirectory
+      processedSourceDirectory,
+      archiveOutputDirectory,
+      archiveStagingDirectory
     };
-    this.config.archiveOutputDirectory = archiveOutputDirectory;
-    if (Object.prototype.hasOwnProperty.call(config, 'archiveOutputDirectory')) {
-      this.config.archiveStagingDirectory = makeArchiveStagingDirectory(archiveOutputDirectory);
-    }
     if (this.config.intakeDirectory && this.config.archiveStagingDirectory && this.config.archiveOutputDirectory) {
       validatePathLayout(this.config, this.config.intakeDirectory);
     }
@@ -1921,7 +1941,7 @@ class QueueManager extends EventEmitter {
       })
       .filter(Boolean);
     const queueMatches = this.jobs
-      .filter((job) => !['cancelled', 'failed'].includes(job.status) && normalizeName(job.displayName) === normalizedTaskName)
+      .filter((job) => isDuplicateCandidateJob(job) && normalizeName(job.displayName) === normalizedTaskName)
       .slice(0, 20)
       .map((job) => ({ jobId: job.id, displayName: job.displayName, archiveBaseName: job.archiveBaseName }));
     const nameDuplicateMatches = [...catalogMatches, ...queueMatches].slice(0, 20);
@@ -1934,7 +1954,7 @@ class QueueManager extends EventEmitter {
       ),
       ...findSimilarProjects(
         task,
-        this.jobs.filter((job) => !['cancelled', 'failed'].includes(job.status)),
+        this.jobs.filter(isDuplicateCandidateJob),
         this.similarityIgnoreTerms
       )
     ].filter((match, index, items) => items.findIndex((item) => item.id === match.id) === index).slice(0, 20);
@@ -2077,7 +2097,7 @@ class QueueManager extends EventEmitter {
     const ids = [...new Set(recordIds || [])];
     if (ids.length === 0) throw new Error('请先选择仓库内容。');
     const existingCatalogJobs = new Set(this.jobs
-      .filter((job) => !['cancelled', 'failed'].includes(job.status) && job.sourceCatalogRecordId)
+      .filter((job) => isDuplicateCandidateJob(job) && job.sourceCatalogRecordId)
       .map((job) => job.sourceCatalogRecordId));
     const added = [];
     const failures = [];

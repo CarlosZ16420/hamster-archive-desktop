@@ -10,7 +10,7 @@ Local-first batch archiver and searchable media vault for Windows.
 
 本地优先 · 批量归档 · 媒体预览 · 便携数据
 
-![Version](https://img.shields.io/badge/version-4.4.9-d45f3c?style=flat-square)
+![Version](https://img.shields.io/badge/version-4.5.0-d45f3c?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-23211d?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-2f7558?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-43-456f83?style=flat-square)
@@ -112,19 +112,18 @@ Local-first batch archiver and searchable media vault for Windows.
 2. 完整解压后运行 `HamsterArchiver.exe`。
 3. 选择“需要备份的文件主目录”和“打包后文件存放点”，先扫描并确认任务，再开始压缩入库。
 
-请保留发行包的目录结构，不要只复制 EXE。Electron 运行库、7-Zip、FFmpeg 与 `userdata` 都依赖相对位置。应用和数据盘整体换盘后，相对工具路径仍能自动定位。
+请保留发行包的目录结构，不要只复制 EXE。Electron、7-Zip 与 FFmpeg 依赖完整发行目录；用户数据区默认是旁边的 `userdata`，也可以在“更多设置”中安全复制或切换到其他目录。
 
 ### 自动更新失败时手动更新
 
-如果应用提示自动更新没有完成，旧版本不会被删除，可以继续使用。建议按下面的方式迁移，直接复制便携数据比重新导入仓库更完整：
+如果应用提示自动更新没有完成，旧版本不会被删除，可以继续使用。失败提示会推荐通过仓库导出与导入完成手动升级，避免直接搬动内部数据目录：
 
 更新检查使用公开 Release 渠道；源代码和开发提交保存在私人仓库。4.2.0 能发现并校验新的 Release，但它内置的旧更新脚本会把新版 `resources` 复制成嵌套目录，启动验证仍读到 4.2.0 后自动回滚。因此，从 4.2.0 升级必须按下面的手动步骤迁移；完成一次手动升级后，修复版更新器会先完整替换已备份的程序目录，再进行启动验证。用户的 `userdata` 始终排除在替换范围之外。
 
-1. 在旧版本的“仓库”中先导出一次仓库作为保险，然后完全退出应用。
+1. 在旧版本的“仓库”中使用“导出仓库”生成仓库压缩包，然后完全退出应用。
 2. 从 [Releases](../../releases) 下载最新 Windows x64 压缩包，完整解压到一个**新文件夹**；不要只替换 EXE，也不要覆盖仍在运行的旧目录。
-3. 确认两个版本都已关闭，把旧版本目录中的 `userdata` 整个复制到新版本目录，覆盖新版本中尚为空白的 `userdata`。
-4. 运行新目录中的 `HamsterArchiver.exe`，确认版本号、仓库记录和缩略图正常后，再删除旧版本目录。
-5. 如果复制 `userdata` 后仓库无法读取，请保留旧目录，并在新版本中使用“并入外部仓库”导入第 1 步导出的仓库压缩包。
+3. 运行新目录中的 `HamsterArchiver.exe`，在“仓库”中选择“并入外部仓库”，导入第 1 步生成的仓库压缩包。
+4. 确认版本号、仓库记录和缩略图正常；完成核对前请保留旧程序目录。
 
 更新器只有确认独立更新助手已经启动，才会退出主程序。启动失败会留在当前版本并显示手动更新步骤；替换或启动验证失败时会自动回滚，并在旧版本重新打开后展示失败原因和诊断目录。
 
@@ -146,7 +145,7 @@ npm start
 ## 便携数据布局
 
 ```text
-HamsterArchiver-v4.4.9-win-x64/
+HamsterArchiver-v4.5.0-win-x64/
 ├─ HamsterArchiver.exe
 ├─ tools/
 │  ├─ 7zip/
@@ -162,7 +161,7 @@ HamsterArchiver-v4.4.9-win-x64/
 
 压缩暂存目录默认建立在“打包后文件存放点”旁，例如 `D:\packed-staging`，以减少跨盘移动。待备份主目录和成品存放点由用户选择，不属于源码或用户数据库。
 
-`userdata` 可能包含密码、文件路径、缩略图和仓库索引。它被 Git 忽略，也不会进入公开快照；迁移软件时应在应用退出后复制整个程序目录。
+用户数据区可能包含密码、文件路径、缩略图和仓库索引。它被 Git 忽略，也不会进入公开快照；通过“更多设置”切换位置时，空目标会先复制数据且保留旧目录，已有数据目标不会与当前仓库自动合并。
 
 ## 技术与边界
 

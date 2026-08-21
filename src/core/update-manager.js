@@ -128,19 +128,17 @@ catch {
 function manualUpdateInstructions(language = 'zh-CN') {
   if (language === 'en-US') {
     return [
-      '1. Exit Hamster Archiver and export the warehouse once from the old version as a safety copy.',
+      '1. In the old version, use Export warehouse to create a warehouse ZIP, then exit Hamster Archiver completely.',
       '2. Download the latest Windows x64 ZIP from GitHub Releases and extract it into a new directory. Do not replace only the EXE or overwrite a running directory.',
-      '3. With both versions closed, copy the complete userdata directory from the old version into the new version, replacing the new empty userdata.',
-      '4. Run HamsterArchiver.exe from the new directory. Verify the version, warehouse records and thumbnails before deleting the old directory.',
-      '5. If the copied userdata cannot be read, keep the old directory and import the warehouse archive exported in step 1.'
+      '3. Run HamsterArchiver.exe from the new directory, open Warehouse, choose Import external warehouse, and select the ZIP exported in step 1.',
+      '4. Verify the version, warehouse records and thumbnails. Keep the old program directory until the imported warehouse has been checked.'
     ].join('\n');
   }
   return [
-    '1. 先关闭 Hamster Archiver，并在旧版本的“仓库”中导出一次仓库作为保险。',
+    '1. 在旧版本的“仓库”中使用“导出仓库”生成仓库压缩包，然后完全退出 Hamster Archiver。',
     '2. 从 GitHub Releases 下载最新的 Windows x64 压缩包，完整解压到一个新文件夹；不要只替换 EXE，也不要覆盖正在运行的旧目录。',
-    '3. 在两个版本都关闭时，把旧版本目录中的 userdata 整个复制到新版本目录，覆盖新版本的空 userdata。',
-    '4. 运行新目录中的 HamsterArchiver.exe，确认版本号、仓库记录和缩略图正常后，再删除旧版本目录。',
-    '5. 如果复制 userdata 后仓库无法读取，请保留旧目录，在新版本中使用“并入外部仓库”导入第 1 步导出的仓库压缩包。'
+    '3. 运行新目录中的 HamsterArchiver.exe，在“仓库”中选择“并入外部仓库”，导入第 1 步生成的仓库压缩包。',
+    '4. 确认版本号、仓库记录和缩略图正常；完成核对前请保留旧程序目录。'
   ].join('\n');
 }
 

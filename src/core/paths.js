@@ -88,7 +88,12 @@ function rebasePortableUserDataPaths(config, layout) {
   const previousRoot = String(config.userDataDirectory || '').trim();
   const currentRoot = path.resolve(layout.root);
   if (previousRoot && normalizeForComparison(previousRoot) !== normalizeForComparison(currentRoot)) {
-    for (const key of ['repositoryDirectory', 'processedSourceDirectory', 'similarityIgnoreTermsPath']) {
+    for (const key of [
+      'repositoryDirectory',
+      'processedSourceDirectory',
+      'similarityIgnoreTermsPath',
+      'archiveStagingDirectory'
+    ]) {
       const value = String(config[key] || '').trim();
       if (!value || !isPathInside(previousRoot, value)) continue;
       config[key] = path.join(currentRoot, path.relative(previousRoot, value));
