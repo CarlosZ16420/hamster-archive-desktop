@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const test = require('node:test');
+const { LARGE_TASK_BYTES } = require('../src/core/constants');
 const {
   createArchiveName,
   createConfiguredArchiveName,
@@ -98,6 +99,8 @@ test('new installs keep source/output user-selected and default processed inside
   assert.equal(config.thumbnailLimit, 30);
   assert.equal(config.archiveFormat, '7z');
   assert.equal(config.compressionLevel, 1);
+  assert.equal(config.archiveVolumeEnabled, true);
+  assert.equal(config.archiveVolumeBytes, LARGE_TASK_BYTES);
 });
 
 test('portable tools remain relative and owned user-data paths rebase after moving the app', () => {

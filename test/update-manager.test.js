@@ -16,6 +16,7 @@ const {
   launchUpdate,
   manualUpdateInstructions,
   normalizeDigest,
+  normalizeVersion,
   resolvePowerShellExecutable
 } = require('../src/core/update-manager');
 
@@ -25,7 +26,14 @@ test('update digest accepts GitHub SHA256 format and rejects malformed values', 
   const digest = 'a'.repeat(64);
   assert.equal(normalizeDigest(`sha256:${digest.toUpperCase()}`), digest);
   assert.equal(normalizeDigest(digest), digest);
+  assert.equal(normalizeDigest(`${digest}  HamsterArchiver-v4.0.1-win-x64.zip`), digest);
   assert.equal(normalizeDigest('sha256:not-a-digest'), '');
+});
+
+test('update manifest version accepts a Release v prefix but keeps other differences visible', () => {
+  assert.equal(normalizeVersion('v4.4.6'), '4.4.6');
+  assert.equal(normalizeVersion(' V4.4.6 '), '4.4.6');
+  assert.notEqual(normalizeVersion('4.4.5'), normalizeVersion('v4.4.6'));
 });
 
 test('update package hashing produces a stable SHA256 value', async (t) => {
@@ -42,6 +50,7 @@ test('update script requires the current portable executable name', () => {
   assert.match(APPLY_UPDATE_SCRIPT, /started\.json/);
   assert.match(UPDATE_LAUNCHER_SCRIPT, /Start-Process/);
   assert.match(UPDATE_LAUNCHER_SCRIPT, /apply-update\.ps1/);
+  assert.match(APPLY_UPDATE_SCRIPT, /Normalize-Version/);
 });
 
 test('PowerShell resolver prefers the stable Windows system path', () => {

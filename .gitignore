@@ -41,6 +41,9 @@ BUG1/
 项目名称：*.md
 ReadmeGlmversion.md
 
+# 第三方核查脚本生成的本地探针目录（保留在本机，不进入发布检查）
+hy测试目录/*/
+
 # 构建/发布产物：源码仓库不直接保存大二进制
 HamsterArchive.exe
 HamsterArchiver.exe

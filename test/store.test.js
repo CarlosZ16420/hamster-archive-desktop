@@ -44,6 +44,13 @@ test('SQLite repository persists catalog, jobs and pending manifests incremental
 
   await store.saveCatalog(repositoryDirectory, [{ ...record, notes: '只更新这一条' }]);
   assert.equal((await store.loadCatalog(repositoryDirectory))[0].notes, '只更新这一条');
+  const second = { ...record, id: 'record-two', title: '第二条', displayName: '第二条', manifest: [] };
+  await store.saveCatalog(repositoryDirectory, [{ ...record, notes: '保留' }, second]);
+  await store.saveCatalogRecords(repositoryDirectory, [{ ...second, backupLocation: '移动硬盘 B' }], [{ ...record, notes: '保留' }, second]);
+  const afterSubsetUpdate = await store.loadCatalog(repositoryDirectory);
+  assert.equal(afterSubsetUpdate.length, 2);
+  assert.equal(afterSubsetUpdate.find((item) => item.id === 'record-one').notes, '保留');
+  assert.equal(afterSubsetUpdate.find((item) => item.id === 'record-two').backupLocation, '移动硬盘 B');
   await store.deletePendingManifest(repositoryDirectory, job.id);
   assert.equal(await store.loadPendingManifest(repositoryDirectory, job.id), null);
   store.closeAll();

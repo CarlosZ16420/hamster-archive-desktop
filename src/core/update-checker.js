@@ -41,6 +41,11 @@ async function checkForUpdates({ currentVersion, fetchImpl = globalThis.fetch, t
   const assets = Array.isArray(release.assets) ? release.assets : [];
   const expectedAssetName = `hamsterarchiver-v${latestVersion}-win-x64.zip`.toLowerCase();
   const archiveAsset = assets.find((asset) => String(asset.name || '').toLowerCase() === expectedAssetName);
+  const archiveName = String(archiveAsset?.name || '').toLowerCase();
+  const digestAsset = archiveAsset && assets.find((asset) => {
+    const name = String(asset.name || '').toLowerCase();
+    return name === `${archiveName}.sha256` || name === `${archiveName}.sha256.txt`;
+  });
   return {
     currentVersion,
     latestVersion,
@@ -51,7 +56,8 @@ async function checkForUpdates({ currentVersion, fetchImpl = globalThis.fetch, t
       name: String(archiveAsset.name || ''),
       downloadUrl: String(archiveAsset.browser_download_url || ''),
       size: Number(archiveAsset.size) || 0,
-      digest: String(archiveAsset.digest || '')
+      digest: String(archiveAsset.digest || ''),
+      digestDownloadUrl: String(digestAsset?.browser_download_url || '')
     } : null
   };
 }

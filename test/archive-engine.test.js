@@ -3,8 +3,10 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const test = require('node:test');
-const { LARGE_TASK_BYTES } = require('../src/core/constants');
-const { buildCompressArgs, buildVerifyArgs } = require('../src/core/archive-engine');
+const { LARGE_TASK_BYTES, MIB } = require('../src/core/constants');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const { assertEnoughDiskSpace, buildCompressArgs, buildVerifyArgs } = require('../src/core/archive-engine');
 
 function makeJob(totalBytes) {
   return {
@@ -17,13 +19,38 @@ test('small task has no password by default and is not split', () => {
   const args = buildCompressArgs(makeJob(LARGE_TASK_BYTES), 'E:\\stage\\test.7z');
   assert.equal(args.includes('-mhe=on'), false);
   assert.equal(args.some((arg) => arg.startsWith('-p')), false);
-  assert.equal(args.includes('-v10g'), false);
+  assert.equal(args.some((arg) => arg.startsWith('-v')), false);
   assert.equal(args.at(-1), '示例目录');
 });
 
 test('task larger than 10 GiB uses 10 GiB volumes', () => {
   const args = buildCompressArgs(makeJob(LARGE_TASK_BYTES + 1), 'E:\\stage\\test.7z');
-  assert.ok(args.includes('-v10g'));
+  assert.ok(args.includes(`-v${LARGE_TASK_BYTES}b`));
+});
+
+test('enabled custom volume size is passed to 7-Zip in exact bytes', () => {
+  const archiveVolumeBytes = 512 * MIB;
+  const args = buildCompressArgs({
+    ...makeJob(2 * 1024 ** 3),
+    archiveVolumeEnabled: true,
+    archiveVolumeBytes
+  }, 'E:\\stage\\test.7z');
+  assert.ok(args.includes(`-v${archiveVolumeBytes}b`));
+});
+
+test('disabled optional splitting keeps small tasks whole but cannot bypass 10 GiB safety volumes', () => {
+  const smallArgs = buildCompressArgs({
+    ...makeJob(2 * 1024 ** 3),
+    archiveVolumeEnabled: false,
+    archiveVolumeBytes: 512 * MIB
+  }, 'E:\\stage\\small.7z');
+  const largeArgs = buildCompressArgs({
+    ...makeJob(LARGE_TASK_BYTES + 1),
+    archiveVolumeEnabled: false,
+    archiveVolumeBytes: 512 * MIB
+  }, 'E:\\stage\\large.7z');
+  assert.equal(smallArgs.some((arg) => arg.startsWith('-v')), false);
+  assert.ok(largeArgs.includes(`-v${LARGE_TASK_BYTES}b`));
 });
 
 test('verification has no password argument by default', () => {
@@ -53,4 +80,12 @@ test('zip format uses selected compression level without 7z header encryption', 
   assert.ok(args.includes('-mx=7'));
   assert.ok(args.includes('-pzip-pass'));
   assert.equal(args.includes('-mhe=on'), false);
+});
+
+test('disk-space guard rejects an impossibly large task instead of silently continuing', async () => {
+  await assert.rejects(
+    assertEnoughDiskSpace(os.tmpdir(), Number.MAX_SAFE_INTEGER, '测试磁盘'),
+    (error) => error.code === 'INSUFFICIENT_DISK_SPACE'
+  );
+  assert.ok(await fs.stat(os.tmpdir()));
 });

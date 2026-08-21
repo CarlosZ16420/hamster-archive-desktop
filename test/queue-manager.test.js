@@ -7,18 +7,21 @@ const os = require('node:os');
 const test = require('node:test');
 const { QueueManager } = require('../src/core/queue-manager');
 const { CancelledError } = require('../src/core/archive-engine');
+const { buildManifest } = require('../src/core/manifest');
 const { AppStore } = require('../src/core/store');
+const { LARGE_TASK_BYTES, MIB } = require('../src/core/constants');
 
 class FakeStore {
+  constructor() { this.pendingManifests = new Map(); }
   async loadJobs() { return []; }
   async loadCatalog() { return []; }
   async saveJobs(_library, jobs) { this.jobs = structuredClone(jobs); }
   async saveCatalog() {}
   async saveSettings() {}
   async appendLog() {}
-  async loadPendingManifest() { return null; }
-  async savePendingManifest() {}
-  async deletePendingManifest() {}
+  async loadPendingManifest(_library, jobId) { return this.pendingManifests.get(jobId) || null; }
+  async savePendingManifest(_library, jobId, manifest) { this.pendingManifests.set(jobId, structuredClone(manifest)); }
+  async deletePendingManifest(_library, jobId) { this.pendingManifests.delete(jobId); }
 }
 
 function queuedJob(id) {
@@ -64,6 +67,58 @@ test('shutdown cancels current job and does not start the next queued job', asyn
   assert.equal(manager.running, false);
 });
 
+test('queue stops instead of repeating a job whose state did not advance', async () => {
+  const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' });
+  const job = queuedJob('stalled');
+  manager.jobs = [job];
+  let calls = 0;
+  manager.runOne = async () => { calls += 1; };
+
+  await manager.startQueue();
+
+  assert.equal(calls, 1);
+  assert.equal(job.status, 'failed');
+  assert.equal(job.errorCode, 'QUEUE_STATE_STALLED');
+});
+
+test('failed resume aborts the current task and stops the queue', async () => {
+  const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' });
+  let aborted = false;
+  manager.running = true;
+  manager.paused = true;
+  manager.jobs = [{ ...queuedJob('paused'), status: 'compressing' }];
+  manager.pauseController = { resume: async () => {
+    const error = new Error('PowerShell timeout');
+    error.code = 'PROCESS_CONTROL_TIMEOUT';
+    throw error;
+  } };
+  manager.abortController = { abort: () => { aborted = true; } };
+
+  await assert.rejects(() => manager.resumeCurrent(), /已安全取消当前任务/);
+
+  assert.equal(aborted, true);
+  assert.equal(manager.stopRequested, true);
+  assert.equal(manager.paused, false);
+});
+
+test('disk-space safety failure stops the whole queue before the next task', async () => {
+  const calls = [];
+  const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' }, {
+    archiveRunner: async (job) => {
+      calls.push(job.id);
+      const error = new Error('暂存磁盘可用空间不足');
+      error.code = 'INSUFFICIENT_DISK_SPACE';
+      throw error;
+    }
+  });
+  manager.jobs = [queuedJob('first'), queuedJob('second')];
+  await manager.startQueue();
+  assert.deepEqual(calls, ['first']);
+  assert.equal(manager.jobs[0].status, 'failed');
+  assert.equal(manager.jobs[1].status, 'queued');
+  assert.match(manager.jobs[0].stageText, /磁盘空间安全停止/);
+});
+
 test('clear queue stops current work and removes every task', async () => {
   let signalStarted;
   const started = new Promise((resolve) => { signalStarted = resolve; });
@@ -95,6 +150,18 @@ test('completed tasks can be cleared without touching active or failed tasks', a
   assert.deepEqual(manager.jobs.map((job) => job.id), ['failed']);
 });
 
+test('cancelled tasks can be cleared without touching failed or queued tasks', async () => {
+  const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' });
+  manager.jobs = [
+    { ...queuedJob('cancelled'), status: 'cancelled' },
+    { ...queuedJob('failed'), status: 'failed' },
+    { ...queuedJob('queued'), status: 'queued' }
+  ];
+  const result = await manager.clearCancelledJobs();
+  assert.equal(result.removedCount, 1);
+  assert.deepEqual(manager.jobs.map((job) => job.id), ['failed', 'queued']);
+});
+
 test('possible duplicate tasks can be cleared with one action', async () => {
   const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' });
   manager.jobs = [
@@ -104,6 +171,17 @@ test('possible duplicate tasks can be cleared with one action', async () => {
   const result = await manager.removePotentialDuplicateJobs();
   assert.equal(result.removedCount, 1);
   assert.deepEqual(manager.jobs.map((job) => job.id), ['unique']);
+});
+
+test('exact duplicate tasks can be cleared separately', async () => {
+  const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' });
+  manager.jobs = [
+    { ...queuedJob('possible'), similarMatches: [{ id: 'old' }], exactDuplicateMatches: [] },
+    { ...queuedJob('exact'), exactDuplicateMatches: [{ md5: 'abc' }] }
+  ];
+  const exactResult = await manager.removeExactDuplicateJobs();
+  assert.equal(exactResult.removedCount, 1);
+  assert.deepEqual(manager.jobs.map((job) => job.id), ['possible']);
 });
 
 test('all duplicate and similar confirmations can be accepted in one action', async () => {
@@ -139,6 +217,36 @@ test('each queued task keeps the password that was active when it was added', as
   assert.equal(manager.config.archivePassword, 'second-password');
   assert.equal(Object.hasOwn(manager.getState().jobs[0], 'archivePassword'), false);
   assert.equal(manager.getState().jobs[0].hasPassword, true);
+});
+
+test('each queued task snapshots configurable volume settings within safe bounds', async () => {
+  const firstVolumeBytes = 512 * MIB;
+  const manager = new QueueManager(new FakeStore(), {
+    libraryDir: 'E:\\library',
+    archiveVolumeEnabled: true,
+    archiveVolumeBytes: firstVolumeBytes
+  });
+  const job = manager.createJob({
+    sourcePath: 'E:\\source\\volume-test',
+    sourceType: 'directory',
+    displayName: 'volume-test',
+    fileCount: 1,
+    totalBytes: 2 * 1024 ** 3
+  });
+
+  await manager.updateConfig({ archiveVolumeEnabled: false, archiveVolumeBytes: LARGE_TASK_BYTES });
+  assert.equal(job.archiveVolumeEnabled, true);
+  assert.equal(job.archiveVolumeBytes, firstVolumeBytes);
+  assert.equal(manager.config.archiveVolumeEnabled, false);
+  assert.equal(manager.config.archiveVolumeBytes, LARGE_TASK_BYTES);
+  await assert.rejects(
+    manager.updateConfig({ archiveVolumeEnabled: true, archiveVolumeBytes: (64 * MIB) - 1 }),
+    /64 MiB—10 GiB/
+  );
+  await assert.rejects(
+    manager.updateConfig({ archiveVolumeEnabled: true, archiveVolumeBytes: LARGE_TASK_BYTES + 1 }),
+    /64 MiB—10 GiB/
+  );
 });
 
 test('completed archives remember their task password without exposing it in warehouse summaries', async () => {
@@ -220,6 +328,26 @@ test('legacy-shaped records are never backfilled from the current global passwor
   assert.equal(record.archivePassword, '');
   assert.equal(record.passwordRecorded, false);
   assert.equal(record.hasPassword, false);
+});
+
+test('empty optional catalog fields normalize safely without null values', async () => {
+  class NullCatalogStore extends FakeStore {
+    async loadCatalog() {
+      return [{
+        id: 'null-fields', title: '空字段', displayName: '空字段', tags: null,
+        notes: null, backupLocation: null, sourcePath: null, originalSourcePath: null,
+        manifest: null, directories: null, archiveFiles: null, similarRecords: null
+      }];
+    }
+  }
+  const manager = new QueueManager(new NullCatalogStore(), { libraryDir: 'E:\\library' });
+  await manager.initialize();
+  const record = manager.getCatalogDetails('null-fields');
+  assert.equal(record.backupLocation, '');
+  assert.equal(record.sourcePath, '');
+  assert.deepEqual(record.tags, []);
+  assert.deepEqual(record.manifest, []);
+  assert.deepEqual(record.directories, []);
 });
 
 test('thumbnail limit is configurable within a bounded range', async () => {
@@ -793,6 +921,24 @@ test('bulk backup location and metadata changes can be undone up to the previous
   assert.equal(manager.catalog[0].backupLocation, '');
 });
 
+test('bulk backup undo does not recalculate similarity for every record', async () => {
+  const store = new FakeStore();
+  let subsetWrites = 0;
+  store.saveCatalogRecords = async () => { subsetWrites += 1; };
+  const manager = new QueueManager(store, { libraryDir: 'E:\\library' });
+  manager.catalog = Array.from({ length: 161 }, (_, index) => ({
+    id: `record-${index}`, recordType: 'manual', displayName: `项目 ${index}`, title: `项目 ${index}`,
+    notes: '备注', tags: [], rating: 0, backupLocation: '', manifest: [], directories: [], similarRecords: []
+  }));
+  let similarityCalls = 0;
+  manager.refreshSimilarityForRecord = () => { similarityCalls += 1; };
+  await manager.updateBackupLocationForCatalogRecords(manager.catalog.map((record) => record.id), '移动硬盘 A');
+  await manager.undoCatalogAction();
+  assert.equal(similarityCalls, 0);
+  assert.equal(subsetWrites, 2);
+  assert.ok(manager.catalog.every((record) => record.backupLocation === ''));
+});
+
 test('single archive password changes only through explicit metadata editing', async () => {
   const manager = new QueueManager(new FakeStore(), { libraryDir: 'E:\\library' });
   manager.catalog = [
@@ -818,6 +964,55 @@ test('warehouse undo history is capped at ten actions', async () => {
     await manager.updateBackupLocationForCatalogRecords(['one'], `位置 ${index}`);
   }
   assert.equal(manager.getState().undoDepth, 10);
+  assert.ok(manager.logs.some((entry) => entry.message.includes('撤销记录已达到上限')));
+});
+
+test('deleting one catalog record does not erase unrelated undo history', async () => {
+  const store = new FakeStore();
+  store.saveCatalog = async () => {};
+  const manager = new QueueManager(store, { libraryDir: 'E:\\library' });
+  manager.catalog = [
+    { id: 'edited', recordType: 'manual', title: '编辑项', displayName: '编辑项', notes: '', tags: [], rating: 0 },
+    { id: 'deleted', recordType: 'manual', title: '删除项', displayName: '删除项', notes: '', tags: [], rating: 0 }
+  ];
+  await manager.updateCatalogMetadata('edited', { notes: '先前修改' });
+  await manager.deleteCatalogRecords(['deleted']);
+  await manager.undoCatalogAction();
+  assert.equal(manager.catalog.find((record) => record.id === 'edited').notes, '');
+});
+
+test('imported warehouse records keep external archive paths and deletion does not trash them', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-import-external-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const external = path.join(root, 'external-repository');
+  const archiveDirectory = path.join(root, 'external-archives');
+  const target = path.join(root, 'target-repository');
+  await fs.mkdir(external, { recursive: true });
+  await fs.mkdir(archiveDirectory, { recursive: true });
+  await fs.mkdir(target, { recursive: true });
+  await fs.writeFile(path.join(external, 'warehouse.sqlite'), 'sqlite');
+  await fs.writeFile(path.join(archiveDirectory, 'outside.7z'), 'archive');
+  const store = new FakeStore();
+  store.loadCatalog = async () => [{
+    id: 'external-record', recordType: 'archive', title: '外部归档', displayName: '外部归档',
+    archiveDirectory, archiveFiles: [{ name: 'outside.7z' }], tags: [], manifest: [], directories: []
+  }];
+  store.closeRepository = () => {};
+  store.saveCatalog = async (_library, records) => { store.catalog = structuredClone(records); };
+  const trashed = [];
+  const manager = new QueueManager(store, {
+    repositoryDirectory: target,
+    archiveOutputDirectory: path.join(root, 'local-archives'),
+    archiveStagingDirectory: path.join(root, 'local-staging')
+  }, { trashItem: async (value) => trashed.push(value) });
+
+  await manager.importWarehouseFromDirectory(external);
+  assert.equal(manager.catalog[0].archiveDirectory, archiveDirectory);
+  assert.equal(manager.catalog[0].importedFrom, external);
+  const result = await manager.deleteCatalogRecords(['external-record']);
+  assert.deepEqual(result.deletedIds, ['external-record']);
+  assert.deepEqual(trashed, []);
+  await fs.access(path.join(archiveDirectory, 'outside.7z'));
 });
 
 test('bulk tag input rejects punctuation outside the tag rules', async () => {
@@ -1074,4 +1269,152 @@ test('random warehouse recommendation visits every item before reshuffling', () 
   }));
   const firstCycle = Array.from({ length: 8 }, () => manager.getRandomCatalogRecord().id);
   assert.equal(new Set(firstCycle).size, 8);
+});
+
+test('inventory-only queue stores a verified manifest without creating an archive or moving the source', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-inventory-only-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const sourcePath = path.join(root, 'source-item');
+  await fs.mkdir(sourcePath, { recursive: true });
+  await fs.writeFile(path.join(sourcePath, 'one.txt'), 'inventory only');
+  let archiveRunnerCalled = false;
+  let thumbnailsCalled = false;
+  const manager = new QueueManager(new FakeStore(), {
+    repositoryDirectory: path.join(root, 'warehouse'),
+    archiveOutputDirectory: path.join(root, 'archives'),
+    archiveStagingDirectory: path.join(root, 'staging'),
+    moveCompleted: true,
+    processedSourceDirectory: path.join(root, 'processed')
+  }, {
+    archiveRunner: async () => { archiveRunnerCalled = true; throw new Error('must not run'); },
+    createThumbnails: async (_job, manifest) => { thumbnailsCalled = true; return manifest; }
+  });
+  manager.jobs = [manager.createJob({
+    sourcePath,
+    sourceType: 'directory',
+    displayName: '直接入库示例',
+    fileCount: 1,
+    totalBytes: 14
+  })];
+
+  const idle = new Promise((resolve) => manager.once('idle', resolve));
+  await manager.startInventoryOnlyQueue();
+  await idle;
+
+  assert.equal(archiveRunnerCalled, false);
+  assert.equal(thumbnailsCalled, true);
+  assert.equal(manager.jobs[0].status, 'completed');
+  assert.equal(manager.catalog.length, 1);
+  assert.equal(manager.catalog[0].archiveState, 'uncompressed');
+  assert.equal(manager.catalog[0].archiveTotalBytes, 0);
+  assert.deepEqual(manager.catalog[0].archiveFiles, []);
+  assert.equal(manager.catalog[0].tags[0], '未压缩');
+  assert.equal(manager.catalog[0].sourceDisposition, 'kept');
+  assert.equal((await fs.stat(sourcePath)).isDirectory(), true);
+});
+
+test('warehouse compression refuses an uncompressed record whose original manifest changed', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-existing-changed-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const sourcePath = path.join(root, 'source-item');
+  await fs.mkdir(sourcePath, { recursive: true });
+  const sourceFile = path.join(sourcePath, 'one.txt');
+  await fs.writeFile(sourceFile, 'before');
+  const manifest = await buildManifest(sourcePath, 'directory');
+  await fs.writeFile(sourceFile, 'content changed after intake');
+  const manager = new QueueManager(new FakeStore(), {
+    repositoryDirectory: path.join(root, 'warehouse')
+  });
+  manager.catalog = [{
+    id: 'uncompressed-changed',
+    jobId: 'original-job',
+    title: '已变化项目',
+    displayName: '已变化项目',
+    recordType: 'archive',
+    archiveState: 'uncompressed',
+    tags: ['未压缩'],
+    sourceType: 'directory',
+    sourcePath,
+    originalSourcePath: sourcePath,
+    sourceDisposition: 'kept',
+    originalBytes: 6,
+    manifest,
+    directories: []
+  }];
+
+  const result = await manager.queueCatalogRecordsForCompression(['uncompressed-changed']);
+
+  assert.equal(result.queuedCount, 0);
+  assert.equal(result.failedCount, 1);
+  assert.equal(manager.jobs.length, 0);
+  assert.match(result.failures[0].reason, /源文件发生变化/);
+});
+
+test('warehouse compression upgrades the same uncompressed record and removes its system label', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-existing-upgrade-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const sourcePath = path.join(root, 'source-item');
+  await fs.mkdir(sourcePath, { recursive: true });
+  await fs.writeFile(path.join(sourcePath, 'one.txt'), '1234567890');
+  const manifest = await buildManifest(sourcePath, 'directory');
+  const store = new FakeStore();
+  const manager = new QueueManager(store, {
+    repositoryDirectory: path.join(root, 'warehouse'),
+    archiveOutputDirectory: path.join(root, 'archives'),
+    archiveStagingDirectory: path.join(root, 'staging'),
+    moveCompleted: false,
+    autoTrashCompleted: false
+  }, {
+    archiveRunner: async (_job, _config, hooks) => {
+      await hooks.onManifestReady(manifest);
+      await hooks.onStage('compressing', '正在压缩');
+      await hooks.onProgress(100);
+      await hooks.onStage('verifying', '正在校验');
+      return {
+        archiveFiles: [{ name: 'upgraded.7z', size: 5 }],
+        archiveTotalBytes: 5,
+        manifest,
+        directories: [],
+        skippedFiles: [],
+        passwordScheme: 'none',
+        hasPassword: false,
+        verifiedAt: new Date().toISOString()
+      };
+    }
+  });
+  manager.catalog = [{
+    id: 'uncompressed-upgrade',
+    jobId: 'original-job',
+    title: '保留自定义标题',
+    displayName: '原始名称',
+    recordType: 'archive',
+    archiveState: 'uncompressed',
+    tags: ['未压缩', '旅行'],
+    rating: 4,
+    notes: '保留备注',
+    sourceType: 'directory',
+    sourcePath,
+    originalSourcePath: sourcePath,
+    sourceDisposition: 'kept',
+    originalBytes: 10,
+    manifest,
+    directories: [],
+    archiveFiles: []
+  }];
+
+  const queued = await manager.queueCatalogRecordsForCompression(['uncompressed-upgrade']);
+  assert.equal(queued.queuedCount, 1);
+  assert.equal(manager.jobs[0].sourceCatalogRecordId, 'uncompressed-upgrade');
+  assert.equal(manager.jobs[0].stageText, '库内项目压缩 · 等待压缩');
+  await manager.startQueue();
+
+  assert.equal(manager.jobs[0].status, 'completed');
+  assert.equal(manager.catalog.length, 1);
+  assert.equal(manager.catalog[0].id, 'uncompressed-upgrade');
+  assert.equal(manager.catalog[0].archiveState, 'compressed');
+  assert.equal(manager.catalog[0].tags.includes('未压缩'), false);
+  assert.equal(manager.catalog[0].tags.includes('旅行'), true);
+  assert.equal(manager.catalog[0].title, '保留自定义标题');
+  assert.equal(manager.catalog[0].notes, '保留备注');
+  assert.deepEqual(manager.catalog[0].archiveFiles, [{ name: 'upgraded.7z', size: 5 }]);
 });

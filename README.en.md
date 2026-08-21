@@ -10,7 +10,7 @@ Local-first batch archiver and searchable media vault for Windows.
 
 Local-first · Batch archiving · Media previews · Portable user data
 
-![Version](https://img.shields.io/badge/version-4.2.0-d45f3c?style=flat-square)
+![Version](https://img.shields.io/badge/version-4.4.7-d45f3c?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-23211d?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-2f7558?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-43-456f83?style=flat-square)
@@ -38,7 +38,7 @@ The application scans one source directory, creates one task for every direct ch
 Scan → manifest and duplicate checks → 7-Zip compression → integrity verification → warehouse record → optional source handling
 ```
 
-Large tasks are automatically split at 10 GiB. Passwords, backup destinations, tags, ratings and notes can be stored per project. Possible duplicates, large tasks and abnormal archive sizes wait for explicit confirmation.
+Volume size is configurable from 64 MiB to 10 GiB, with the existing 10 GiB behavior as the default. Turning optional splitting off cannot bypass confirmation and safety volumes for tasks over 10 GiB. Passwords, backup destinations, tags, ratings and notes can be stored per project. Possible duplicates, large tasks and abnormal archive sizes wait for explicit confirmation.
 
 ## Warehouse
 
@@ -80,6 +80,8 @@ Keep the release directory structure intact. Electron, 7-Zip, FFmpeg and `userda
 
 If the application reports that automatic update did not finish, the old version remains intact and usable. Copying the portable data directory preserves more information than re-importing the warehouse:
 
+Update checks use the public release channel, while source code and development commits are kept in a private repository. Versions 4.2.0 and earlier still check the older public release channel and will not see newer 4.4.x builds until that channel is updated. If 4.2.0 does not find an update, use the manual steps below. Newer builds verify the ZIP SHA256 before installation and roll back if replacement or startup validation fails.
+
 1. Export the warehouse once from the old version as a safety copy, then exit the application completely.
 2. Download the latest Windows x64 ZIP from [Releases](../../releases) and extract it into a **new directory**. Do not replace only the EXE or overwrite a directory that is still running.
 3. With both versions closed, copy the complete `userdata` directory from the old version into the new version, replacing the new empty `userdata`.
@@ -106,7 +108,7 @@ The source repository does not contain the large `ffmpeg.exe` binary. Put FFmpeg
 ## Portable data layout
 
 ```text
-HamsterArchiver-v4.2.0-win-x64/
+HamsterArchiver-v4.4.7-win-x64/
 ├─ HamsterArchiver.exe
 ├─ tools/
 │  ├─ 7zip/
@@ -130,7 +132,7 @@ The staging directory is created beside the selected output directory, for examp
 |---|---|
 | Desktop | Electron 43, context isolation, sandbox and strict CSP |
 | Data | Node built-in SQLite, WAL, transactions and FTS5 |
-| Compression | Portable 7-Zip, 7z/ZIP, 10 GiB volumes, optional passwords and integrity tests |
+| Compression | Portable 7-Zip, 7z/ZIP, configurable 64 MiB–10 GiB volumes, optional passwords and integrity tests |
 | Media | One portable FFmpeg binary for probing and frame extraction |
 | Performance | Warehouse pagination, virtualized directories and persistent search/similarity candidates |
 | Privacy | User data stays local; media, warehouse data and passwords are not uploaded |

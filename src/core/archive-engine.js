@@ -7,11 +7,33 @@ const { spawn } = require('node:child_process');
 const {
   ARCHIVE_PASSWORD,
   LARGE_TASK_BYTES,
+  MAX_ARCHIVE_VOLUME_BYTES,
+  MIN_ARCHIVE_VOLUME_BYTES,
   PASSWORD_SCHEME
 } = require('./constants');
 const { CancelledError } = require('./archive-engine-errors');
 const { buildManifest, collectDirectories, validateManifestUnchanged } = require('./manifest');
 const { validatePathLayout } = require('./paths');
+
+function resolveArchiveVolumeBytes(job) {
+  const totalBytes = Number(job.totalBytes) || 0;
+  const configuredBytes = Number(job.archiveVolumeBytes);
+  const validConfiguredSize = Number.isInteger(configuredBytes) &&
+    configuredBytes >= MIN_ARCHIVE_VOLUME_BYTES && configuredBytes <= MAX_ARCHIVE_VOLUME_BYTES;
+  const customVolumeBytes = job.archiveVolumeEnabled === true && validConfiguredSize
+    ? configuredBytes
+    : 0;
+
+  if (customVolumeBytes > 0 && totalBytes > customVolumeBytes) return customVolumeBytes;
+  // 关闭自定义分卷也不会绕过既有的 10 GiB 大任务安全上限。
+  if (totalBytes > LARGE_TASK_BYTES) return LARGE_TASK_BYTES;
+  return 0;
+}
+
+function formatVolumeBytes(bytes) {
+  if (bytes % (1024 ** 3) === 0) return `${bytes / (1024 ** 3)} GiB`;
+  return `${Math.round(bytes / (1024 ** 2))} MiB`;
+}
 
 function buildCompressArgs(job, outputPath, password = ARCHIVE_PASSWORD, listFilePath = '') {
   const format = String(job.archiveFormat || '7z').toLowerCase() === 'zip' ? 'zip' : '7z';
@@ -31,7 +53,8 @@ function buildCompressArgs(job, outputPath, password = ARCHIVE_PASSWORD, listFil
 
   if (password) args.splice(3, 0, ...(format === '7z' ? ['-mhe=on', `-p${password}`] : [`-p${password}`]));
 
-  if (job.totalBytes > LARGE_TASK_BYTES) args.push('-v10g');
+  const archiveVolumeBytes = resolveArchiveVolumeBytes(job);
+  if (archiveVolumeBytes > 0) args.push(`-v${archiveVolumeBytes}b`);
   if (listFilePath) args.push('-scsUTF-8', outputPath, `@${listFilePath}`);
   else args.push(outputPath, '--', path.basename(job.sourcePath));
   return args;
@@ -132,8 +155,20 @@ async function assertUsableConfiguration(config, sourcePath) {
 }
 
 async function assertEnoughDiskSpace(directory, requiredBytes, label = '暂存磁盘') {
-  if (typeof fs.statfs !== 'function') return;
-  const stats = await fs.statfs(directory);
+  if (typeof fs.statfs !== 'function') {
+    const error = new Error(`${label}剩余空间无法读取，已停止任务以避免生成不完整压缩包。`);
+    error.code = 'DISK_SPACE_CHECK_UNAVAILABLE';
+    throw error;
+  }
+  let stats;
+  try {
+    stats = await fs.statfs(directory);
+  } catch (cause) {
+    const error = new Error(`${label}剩余空间读取失败，已停止任务：${cause.message}`);
+    error.code = 'DISK_SPACE_CHECK_UNAVAILABLE';
+    error.cause = cause;
+    throw error;
+  }
   const freeBytes = Number(stats.bavail) * Number(stats.bsize);
   const safetyMargin = Math.max(1024 ** 3, Math.ceil(requiredBytes * 0.05));
   if (freeBytes < requiredBytes + safetyMargin) {
@@ -228,6 +263,13 @@ async function runArchiveJob(job, config, hooks = {}, signal) {
   const onProgress = hooks.onProgress || (() => {});
   const onLog = hooks.onLog || (() => {});
   const pauseController = hooks.pauseController;
+  const volumeJob = {
+    ...job,
+    archiveVolumeEnabled: typeof job.archiveVolumeEnabled === 'boolean'
+      ? job.archiveVolumeEnabled
+      : config.archiveVolumeEnabled === true,
+    archiveVolumeBytes: Number(job.archiveVolumeBytes ?? config.archiveVolumeBytes ?? LARGE_TASK_BYTES)
+  };
 
   await assertUsableConfiguration(config, job.sourcePath);
   const taskStagingDir = path.join(config.archiveStagingDirectory, job.id);
@@ -285,11 +327,12 @@ async function runArchiveJob(job, config, hooks = {}, signal) {
       : path.join(path.basename(job.sourcePath), ...file.relativePath.split('/')));
     await fs.writeFile(listFilePath, `\uFEFF${archiveInputs.map((value) => `"${value}"`).join('\r\n')}\r\n`, 'utf8');
     const hasPassword = Boolean(config.archivePassword);
-    await onStage('compressing', job.totalBytes > LARGE_TASK_BYTES
-      ? `${hasPassword ? '正在加密压缩' : '正在压缩'}并生成 10 GiB 分卷`
+    const archiveVolumeBytes = resolveArchiveVolumeBytes(volumeJob);
+    await onStage('compressing', archiveVolumeBytes > 0
+      ? `${hasPassword ? '正在加密压缩' : '正在压缩'}并生成 ${formatVolumeBytes(archiveVolumeBytes)} 分卷`
       : (hasPassword ? '正在加密压缩' : '正在压缩'));
     onLog(hasPassword ? '开始调用 7-Zip；密码参数已隐藏。' : '开始调用 7-Zip；本任务未设置密码。');
-    await runProcess(config.sevenZipPath, buildCompressArgs(job, outputPath, config.archivePassword, listFilePath), {
+    await runProcess(config.sevenZipPath, buildCompressArgs(volumeJob, outputPath, config.archivePassword, listFilePath), {
       cwd: path.dirname(job.sourcePath),
       signal,
       pauseController,
@@ -331,6 +374,7 @@ async function runArchiveJob(job, config, hooks = {}, signal) {
     return {
       archiveFiles: finalFiles,
       archiveTotalBytes: finalFiles.reduce((sum, item) => sum + item.size, 0),
+      archiveVolumeBytes: archiveVolumeBytes || null,
       manifest,
       directories,
       skippedFiles,
@@ -349,8 +393,10 @@ async function runArchiveJob(job, config, hooks = {}, signal) {
 
 module.exports = {
   CancelledError,
+  assertEnoughDiskSpace,
   buildCompressArgs,
   buildVerifyArgs,
+  resolveArchiveVolumeBytes,
   runArchiveJob,
   runProcess
 };

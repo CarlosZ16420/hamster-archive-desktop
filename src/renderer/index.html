@@ -17,268 +17,250 @@
     </div>
   </div>
 
-  <header class="hero">
-    <div>
-      <p class="eyebrow">Hamster Archiver</p>
-      <h1>仓鼠症大结局</h1>
-      <p class="subtitle">把混乱的文件，变成可视化仓库和规整压缩包，再交给云盘。</p>
+  <header class="app-bar">
+    <div class="brand">
+      <img class="brand-icon" src="../../assets/app-icon.png" alt="">
+      <span class="brand-name">Hamster Archiver</span>
+      <button id="check-for-updates" class="update-status-chip" data-state="current" type="button"><span class="update-status-dot" aria-hidden="true"></span><strong id="update-status-label">检查更新</strong></button>
     </div>
-    <div class="hero-actions">
-      <div id="source-safety-chip" class="safety-chip"><span></span>完成后保留原文件</div>
+    <nav class="top-nav" aria-label="页面导航">
+      <button class="nav-button active" data-page="workbench-page">归档工作台</button>
+      <button class="nav-button" data-page="library-page">仓库</button>
+    </nav>
+    <div class="hero-actions app-bar-actions">
+      <div id="source-safety-chip" class="safety-chip" data-state="keep"><span></span><strong id="source-safety-label">归档后不移动原文件</strong></div>
       <label class="theme-picker" for="theme-mode"><span>主题</span><select id="theme-mode" aria-label="选择界面主题"><option value="classic">经典</option><option value="day" selected>白昼</option><option value="night">黑夜</option></select></label>
       <button id="language-toggle" class="language-toggle" type="button" aria-label="切换到 English"><span class="language-toggle-icon" aria-hidden="true">⇄</span><span id="language-toggle-label">EN</span></button>
     </div>
   </header>
 
-  <nav class="top-nav" aria-label="页面导航">
-    <button class="nav-button active" data-page="workbench-page">归档工作台</button>
-    <button class="nav-button" data-page="library-page">仓库</button>
-  </nav>
-
   <main>
     <div id="workbench-page" class="app-page">
-      <section class="panel settings-panel">
-        <div class="section-title">
-          <div>
-            <p class="step">01 / 归档位置</p>
-            <h2>先确认这次从哪里收、存到哪里</h2>
-          </div>
-          <div class="button-row">
-            <button id="open-usage-guide" class="button ghost" type="button">使用说明</button>
-            <button id="check-for-updates" class="button ghost" type="button">检查更新</button>
-            <button id="save-settings" class="button ghost">保存设置</button>
-          </div>
-        </div>
+      <div class="workbench-grid">
+        <div class="settings-col">
+          <section class="panel settings-panel location-panel">
+            <header class="panel-head location-heading">
+              <p class="step">01 · 收存位置</p>
+              <h2>这次从哪里收，存到哪里</h2>
+            </header>
 
-        <div class="path-grid">
-          <label class="path-field">
-            <span>需要备份的文件主目录 <span class="help-tip" tabindex="0" aria-label="批量备份文件时，为主目录下的每一个文件夹或视频，单独压缩进行备份，跳过其他文件" data-tooltip="批量备份文件时，为主目录下的每一个文件夹或视频，单独压缩进行备份，跳过其他文件">!</span></span>
-            <div><input id="intake-directory" type="text"><button data-pick="intake-directory">选择</button></div>
-          </label>
-          <label class="path-field">
-            <span>最终压缩包存放点</span>
-            <div><input id="archive-output-directory" type="text"><button data-pick="archive-output-directory">选择</button></div>
-          </label>
-        </div>
-
-        <div class="completion-options">
-          <label class="safety-option">
-            <input id="move-completed" type="checkbox">
-            <span>
-              <strong>归档完成后，把对应文件夹或视频移入指定位置 <span class="help-tip" tabindex="0" aria-label="推荐勾选，便于识别哪些文件被备份了" data-tooltip="推荐勾选，便于识别哪些文件被备份了">!</span></strong>
-              <small>只在压缩、完整性验证与入库全部成功后移动；目标重名或移动校验失败时会保留源文件</small>
-            </span>
-          </label>
-          <label id="processed-source-directory-field" class="path-field compact completion-path">
-            <span>将已备份文件移动到</span>
-            <div><input id="processed-source-directory" type="text"><button data-pick="processed-source-directory">选择</button></div>
-          </label>
-        </div>
-
-        <div class="backup-location-setting">
-          <label class="backup-location-toggle">
-            <input id="record-backup-location" type="checkbox">
-            <span>
-              <strong>记录备份位置</strong>
-              <small>填写云盘、移动硬盘或其他备份去向</small>
-            </span>
-          </label>
-          <label id="backup-location-field" class="backup-location-field">
-            <span>备份位置词条</span>
-            <input id="backup-location" type="text" maxlength="200" placeholder="例如：百度网盘 / 家庭备份盘 A">
-          </label>
-        </div>
-
-        <label class="safety-option">
-          <input id="auto-trash-completed" type="checkbox">
-          <span>
-            <strong>归档完成后，把对应原文件夹或视频移入 Windows 回收站</strong>
-            <small>仅在压缩、完整性验证、入库记录和缩略图全部完成后执行；可从回收站恢复</small>
-          </span>
-        </label>
-
-        <details class="advanced">
-          <summary>高级设置</summary>
-          <div class="advanced-paths">
-            <label class="path-field advanced-path-field">
-              <span>用户数据区</span>
-              <div><input id="user-data-path" type="text" readonly><button id="open-user-data" type="button">打开</button></div>
-              <small>集中保存设置、仓库数据库、缩略图、暂存文件和当前用户的一份运行日志</small>
-            </label>
-            <label class="path-field advanced-path-field">
-              <span>压缩暂存目录</span>
-              <div><input id="archive-staging-directory" type="text" readonly></div>
-              <small>默认在打包存放点同目录下新建一个 staging 文件夹，目录不存在时自动创建</small>
-            </label>
-          </div>
-          <div class="password-row archive-password-setting">
-            <span>解压密码</span>
-            <input id="archive-password" type="password" maxlength="128" value="" autocomplete="new-password" placeholder="留空则不设置密码">
-            <button id="toggle-password" class="text-button">显示</button>
-          </div>
-          <label class="record-password-option">
-            <input id="record-archive-password" type="checkbox">
-            <span><strong>记录解压密码</strong><small>把任务实际使用的密码作为专属词条写入仓库；不勾选时只记录“已加密”。</small></span>
-          </label>
-          <div class="intake-options advanced-intake-options">
-            <label class="option-card">
-              <input id="video-frame-backup" type="checkbox">
-              <span><strong>视频帧备份</strong><small>按总时长平均抽取画面，并在仓库中按视频成组显示</small></span>
-              <input id="video-frame-count" type="number" min="1" max="20" step="1" value="3" aria-label="每个视频保存的帧数">
-              <em>帧/视频</em>
-            </label>
-            <label class="option-card">
-              <input id="small-item-filter" type="checkbox">
-              <span><strong>小项目过滤</strong><small>扫描和拖入时跳过低于阈值的视频或文件夹</small></span>
-              <input id="minimum-task-mb" type="number" min="1" max="102400" step="1" value="100" aria-label="最小项目大小">
-              <em>MB</em>
-            </label>
-          </div>
-          <label class="option-card schedule-card advanced-schedule-setting">
-            <input id="schedule-enabled" type="checkbox">
-            <span><strong>定时运行</strong><small>时间不足时不再启动下一项；到结束时间会安全暂停</small></span>
-            <input id="schedule-start" type="time" aria-label="定时开始时间">
-            <span class="schedule-separator">至</span>
-            <input id="schedule-end" type="time" aria-label="定时结束时间">
-          </label>
-          <div class="ignore-terms-setting advanced-option-setting">
-            <div>
-              <strong>相似度排除词表</strong>
-              <small>也就是相似判断的“白名单”。每行一个词；不影响仓库搜索、MD5 或文件大小重复检查。</small>
+            <div class="path-stack">
+              <label class="path-field">
+                <span>需要备份的文件主目录 <span class="help-tip" tabindex="0" aria-label="批量备份文件时，为主目录下的每一个文件夹或视频，单独压缩进行备份，跳过其他文件" data-tooltip="批量备份文件时，为主目录下的每一个文件夹或视频，单独压缩进行备份，跳过其他文件">!</span></span>
+                <div><input id="intake-directory" type="text"><button data-pick="intake-directory">选择</button></div>
+              </label>
+              <label class="path-field">
+                <span>最终压缩包存放点</span>
+                <div><input id="archive-output-directory" type="text"><button data-pick="archive-output-directory">选择</button></div>
+              </label>
             </div>
-            <div class="ignore-terms-actions">
-              <button id="open-similarity-ignore-terms" class="button ghost" type="button">打开词表</button>
-              <button id="reload-similarity-ignore-terms" class="button ghost" type="button">重新载入</button>
+
+            <details class="settings-group post-processing-group" open>
+              <summary class="group-head">
+                <span class="group-title">归档后处理</span>
+                <span id="digest-post" class="group-digest">保留原文件 · 不记录备份位置</span>
+                <span class="group-chevron" aria-hidden="true">⌄</span>
+              </summary>
+              <div class="group-body">
+                <div class="post-option-card move-option-card">
+                  <label class="post-option-heading">
+                    <input id="move-completed" type="checkbox">
+                    <span>
+                      <strong>完成后移动到指定位置 <span class="help-tip" tabindex="0" aria-label="推荐勾选，便于识别哪些文件被备份了" data-tooltip="推荐勾选，便于识别哪些文件被备份了">!</span></strong>
+                      <small>仅在压缩、验证、入库全部成功后移动；失败时保留源文件</small>
+                    </span>
+                  </label>
+                  <label id="processed-source-directory-field" class="path-field embedded-path-field">
+                    <span>将已备份文件移动到</span>
+                    <div><input id="processed-source-directory" type="text"><button data-pick="processed-source-directory">选择</button></div>
+                  </label>
+                </div>
+                <label class="post-option-card post-option-heading danger-option">
+                  <input id="auto-trash-completed" type="checkbox">
+                  <span>
+                    <strong>完成后移入 Windows 回收站</strong>
+                    <small>可从回收站恢复；仅在压缩、验证、入库和缩略图全部成功后执行，异常时安全停止</small>
+                  </span>
+                </label>
+                <div class="post-option-card backup-option-card">
+                  <label class="post-option-heading backup-location-toggle">
+                    <input id="record-backup-location" type="checkbox">
+                    <span><strong>记录备份位置</strong><small>把云盘、移动硬盘或其他备份去向写入仓库词条</small></span>
+                  </label>
+                  <label id="backup-location-field" class="backup-location-field embedded-text-field">
+                    <span>备份位置词条</span>
+                    <input id="backup-location" type="text" maxlength="200" placeholder="例如：百度网盘 / 家庭备份盘 A">
+                  </label>
+                </div>
+              </div>
+            </details>
+          </section>
+
+          <section class="panel settings-panel compact-settings-panel">
+            <details class="settings-group">
+              <summary class="group-head">
+                <span class="group-title">高级压缩设置</span>
+                <span id="digest-compression" class="group-digest">7z · 等级 1 · 时间戳命名 · 分卷 10 GB · 无密码</span>
+                <span class="group-chevron" aria-hidden="true">⌄</span>
+              </summary>
+              <div class="group-body">
+                <div class="compression-options-row">
+                  <label class="compact-number-setting compression-setting">
+                    <span><strong>压缩格式</strong></span>
+                    <select id="archive-format" aria-label="压缩格式"><option value="7z">7z（默认）</option><option value="zip">ZIP</option></select>
+                    <em>格式</em>
+                  </label>
+                  <label class="compact-number-setting compression-setting">
+                    <span><strong>压缩率</strong></span>
+                    <select id="compression-level" aria-label="压缩率"><option value="0">0 · 不压缩</option><option value="1" selected>1 · 快速（默认）</option><option value="3">3 · 标准</option><option value="5">5 · 较高</option><option value="7">7 · 高</option><option value="9">9 · 极限</option></select>
+                    <em>等级</em>
+                  </label>
+                </div>
+                <fieldset class="naming-options">
+                  <legend>压缩包命名方式</legend>
+                  <label><input type="radio" name="archive-naming-mode" value="timestamp_random" checked> 时间戳 + 随机数（默认）</label>
+                  <label><input type="radio" name="archive-naming-mode" value="original"> 原文件名 + 8 位随机数（过长时截断）</label>
+                  <label><input type="radio" name="archive-naming-mode" value="custom_random"> 自定义名 + 8 位随机数</label>
+                  <input id="custom-archive-name" type="text" maxlength="120" placeholder="填写符合 Windows 文件命名规范的自定义名" disabled>
+                </fieldset>
+                <div class="volume-setting enabled" id="volume-setting">
+                  <label class="record-password-option volume-toggle">
+                    <input type="checkbox" id="split-volume" checked>
+                    <span><strong>分卷压缩</strong><small>超过单卷上限时自动拆分；默认 10 GiB，与旧版行为一致。</small></span>
+                  </label>
+                  <div class="volume-inputs" id="volume-inputs">
+                    <label class="volume-size-field">
+                      <span>单卷大小</span>
+                      <span class="volume-row">
+                        <input type="number" id="volume-size" min="1" max="10" step="0.25" value="10" aria-label="单卷大小">
+                        <select id="volume-unit" aria-label="分卷大小单位"><option value="mb">MB</option><option value="gb" selected>GB</option></select>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+                <div class="password-row archive-password-setting">
+                  <span>解压密码</span>
+                  <input id="archive-password" type="password" maxlength="128" value="" autocomplete="new-password" placeholder="留空则不设置密码">
+                  <button id="toggle-password" class="text-button">显示</button>
+                </div>
+                <label class="record-password-option">
+                  <input id="record-archive-password" type="checkbox">
+                  <span><strong>记录解压密码</strong><small>把任务实际使用的密码作为专属词条写入仓库；不勾选时只记录“已加密”。</small></span>
+                </label>
+                <p class="safety-note">安全上限保持为 10 GiB：即使关闭主动分卷，超过 10 GiB 的任务仍须确认并按 10 GiB 分卷。分卷发布、校验、删除与回滚始终按整组处理。</p>
+              </div>
+            </details>
+          </section>
+
+          <section class="panel settings-panel compact-settings-panel">
+            <details class="settings-group">
+              <summary class="group-head">
+                <span class="group-title">入库与预览</span>
+                <span id="digest-intake" class="group-digest">视频抽帧 3 帧/视频 · 缩略图上限 30 张 · 过滤 &lt;100 MB</span>
+                <span class="group-chevron" aria-hidden="true">⌄</span>
+              </summary>
+              <div class="group-body">
+                <div class="intake-options advanced-intake-options">
+                  <label class="option-card"><input id="video-frame-backup" type="checkbox"><span><strong>视频帧备份</strong><small>按总时长平均抽取画面，并在仓库中按视频成组显示</small></span><input id="video-frame-count" type="number" min="1" max="20" step="1" value="3" aria-label="每个视频保存的帧数"><em>帧/视频</em></label>
+                  <label class="option-card"><input id="small-item-filter" type="checkbox"><span><strong>小项目过滤</strong><small>扫描和拖入时跳过低于阈值的视频或文件夹</small></span><input id="minimum-task-mb" type="number" min="1" max="102400" step="1" value="100" aria-label="最小项目大小"><em>MB</em></label>
+                </div>
+                <label class="compact-number-setting"><span><strong>单个项目缩略图上限</strong><small>包括图片缩略图与视频抽帧，避免超大项目生成过多预览。</small></span><input id="thumbnail-limit" type="number" min="1" max="500" step="1" value="30" aria-label="单个项目缩略图上限"><em>张</em></label>
+              </div>
+            </details>
+            <details class="settings-group">
+              <summary class="group-head">
+                <span class="group-title">更多设置</span>
+                <span id="digest-more" class="group-digest">定时运行关闭 · 数据与维护工具</span>
+                <span class="group-chevron" aria-hidden="true">⌄</span>
+              </summary>
+              <div class="group-body">
+                <div class="schedule-setting advanced-schedule-setting">
+                  <label class="check-row schedule-toggle"><input id="schedule-enabled" type="checkbox"><span><strong>定时运行</strong><small>时间不足时不再启动下一项；到结束时间会安全暂停</small></span></label>
+                  <div class="field-pair schedule-time-pair">
+                    <label class="field"><span>开始</span><input id="schedule-start" type="time" aria-label="定时开始时间"></label>
+                    <label class="field"><span>结束</span><input id="schedule-end" type="time" aria-label="定时结束时间"></label>
+                  </div>
+                </div>
+                <div class="ignore-terms-setting advanced-option-setting"><div><strong>相似度排除词表</strong><small>也就是相似判断的“白名单”。每行一个词；不影响仓库搜索、MD5 或文件大小重复检查。</small></div><div class="ignore-terms-actions"><button id="open-similarity-ignore-terms" class="button ghost" type="button">打开词表</button><button id="reload-similarity-ignore-terms" class="button ghost" type="button">重新载入</button></div></div>
+                <div class="advanced-paths">
+                  <label class="path-field advanced-path-field"><span>用户数据区</span><div><input id="user-data-path" type="text" readonly><button id="open-user-data" type="button">打开</button></div><small>集中保存设置、仓库数据库、缩略图、暂存文件和当前用户的一份运行日志</small></label>
+                  <label class="path-field advanced-path-field"><span>压缩暂存目录</span><div><input id="archive-staging-directory" type="text" readonly></div><small>默认在打包存放点同目录下新建一个 staging 文件夹，目录不存在时自动创建</small></label>
+                </div>
+                <div class="settings-utility-actions">
+                  <button id="save-settings" class="button primary">保存设置</button>
+                  <button id="open-usage-guide" class="button ghost" type="button">使用说明</button>
+                </div>
+              </div>
+            </details>
+          </section>
+        </div>
+
+        <div class="queue-col">
+          <section class="panel work-panel">
+            <header class="panel-head queue-title">
+              <div class="queue-heading">
+                <p class="step">02 · 扫描与队列</p>
+                <h2>先预览，再开始归档</h2>
+              </div>
+              <div class="button-row queue-actions">
+                <button id="add-folder" class="button ghost">添加单个文件夹</button>
+                <button id="add-video" class="button ghost">添加单个视频</button>
+                <button id="scan-source" class="button secondary">扫描主目录</button>
+                <span class="queue-action-break" aria-hidden="true"></span>
+                <button id="start-inventory-only" class="button ghost">不压缩直接入库</button>
+                <button id="start-queue" class="button primary">开始压缩入库</button>
+              </div>
+            </header>
+            <div id="notice" class="notice" hidden></div>
+            <div id="drop-zone" class="drop-zone">拖拽或粘贴文件夹、视频，快速加入队列</div>
+            <div class="summary-grid summary-strip">
+              <article><span>任务</span><strong id="summary-total">0</strong></article><article><span>等待确认</span><strong id="summary-confirm">0</strong></article><article><span>等待压缩</span><strong id="summary-queued">0</strong></article><article><span>已完成</span><strong id="summary-completed">0</strong></article><article><span>原始总量</span><strong id="summary-bytes">0 B</strong></article>
             </div>
-          </div>
-          <label class="compact-number-setting">
-            <span><strong>单个项目缩略图上限</strong><small>包括图片缩略图与视频抽帧，避免超大项目生成过多预览。</small></span>
-            <input id="thumbnail-limit" type="number" min="1" max="500" step="1" value="30" aria-label="单个项目缩略图上限">
-            <em>张</em>
-          </label>
-          <div class="compression-options-row">
-            <label class="compact-number-setting compression-setting">
-              <span><strong>压缩格式</strong><small>7z 压缩能力更强；ZIP 兼容性更广。</small></span>
-              <select id="archive-format" aria-label="压缩格式">
-                <option value="7z">7z（默认）</option>
-                <option value="zip">ZIP</option>
-              </select>
-              <em>格式</em>
-            </label>
-            <label class="compact-number-setting compression-setting">
-              <span><strong>压缩率</strong><small>等级越高越慢；1 保持当前的快速默认值。</small></span>
-              <select id="compression-level" aria-label="压缩率">
-                <option value="0">0 · 不压缩</option>
-                <option value="1" selected>1 · 快速（默认）</option>
-                <option value="3">3 · 标准</option>
-                <option value="5">5 · 较高</option>
-                <option value="7">7 · 高</option>
-                <option value="9">9 · 极限</option>
-              </select>
-              <em>等级</em>
-            </label>
-          </div>
-          <fieldset class="naming-options">
-            <legend>压缩包命名方式</legend>
-            <label><input type="radio" name="archive-naming-mode" value="timestamp_random" checked> 时间戳 + 随机数（默认）</label>
-            <label><input type="radio" name="archive-naming-mode" value="original"> 原文件名 + 8 位随机数（过长时截断）</label>
-            <label><input type="radio" name="archive-naming-mode" value="custom_random"> 自定义名 + 8 位随机数</label>
-            <input id="custom-archive-name" type="text" maxlength="120" placeholder="填写符合 Windows 文件命名规范的自定义名" disabled>
-          </fieldset>
-        </details>
-      </section>
+            <div class="queue-toolbar">
+              <span id="queue-selection-hint" class="toolbar-hint">点击任务行的复选框可进行批量操作</span>
+              <div id="queue-selection-actions" class="context-actions" hidden><span id="selection-count" class="selection-count">未选择任务</span><button id="remove-selected" class="button ghost" disabled>移除所选</button></div>
+              <div class="queue-maintenance">
+                <details class="action-menu"><summary class="button ghost">重复项处理</summary><div class="action-menu-popover"><button id="clear-duplicates" class="menu-button">清除可能重复</button><button id="clear-exact-duplicates" class="menu-button">清除精确重复</button><button id="confirm-all-duplicates" class="menu-button">同意全部重复</button></div></details>
+                <details class="action-menu"><summary class="button ghost">清理队列</summary><div class="action-menu-popover"><button id="clear-completed" class="menu-button">清空已完成队列</button><button id="clear-cancelled" class="menu-button">清空已取消队列</button><button id="clear-queue" class="menu-button danger">一键清空队列…</button></div></details>
+              </div>
+              <div class="queue-control-actions">
+                <button id="finish-next" class="button ghost">暂停</button>
+                <button id="pause-queue" class="button warning" hidden>暂停当前任务</button>
+                <button id="resume-queue" class="button primary" hidden>继续当前任务</button>
+              </div>
+            </div>
+            <div id="task-list-container" class="table-wrap"><table><thead><tr><th class="select-cell"><input id="select-all-tasks" type="checkbox" aria-label="选择全部任务"></th><th>任务</th><th>文件</th><th>大小</th><th>状态</th><th>进度</th><th>操作</th></tr></thead><tbody id="task-list"></tbody></table><div id="empty-tasks" class="empty-state">还没有任务。选择一个实际主目录后开始扫描。</div></div>
+            <div id="loose-summary" class="loose-summary" hidden></div>
+          </section>
 
-      <section class="panel work-panel">
-        <div class="section-title">
-          <div>
-            <p class="step">02 / 扫描与队列</p>
-            <h2>先预览，再开始归档</h2>
-          </div>
-          <div class="button-row">
-            <button id="add-folder" class="button ghost">添加单个文件夹</button>
-            <button id="add-video" class="button ghost">添加单个视频</button>
-            <button id="scan-source" class="button secondary">扫描主目录</button>
-            <button id="start-queue" class="button primary">开始压缩入库</button>
-            <button id="finish-next" class="button ghost">完成这一项暂停</button>
-            <button id="pause-queue" class="button warning" hidden>暂停当前任务</button>
-            <button id="resume-queue" class="button primary" hidden>继续当前任务</button>
-          </div>
+          <section class="panel log-panel">
+            <details class="settings-group log-group" open>
+              <summary class="group-head"><span class="group-title">03 · 运行记录</span><span id="digest-log" class="group-digest">暂无日志</span><span id="running-indicator" class="running-indicator">空闲</span><span class="group-chevron" aria-hidden="true">⌄</span></summary>
+              <div class="group-body"><div id="log-list" class="log-list"><p class="muted">暂无日志</p></div></div>
+            </details>
+          </section>
         </div>
-
-        <div id="notice" class="notice" hidden></div>
-        <div id="drop-zone" class="drop-zone">拖拽或粘贴文件夹、视频，快速加入队列</div>
-
-        <div class="summary-grid">
-          <article><span>任务</span><strong id="summary-total">0</strong></article>
-          <article><span>等待确认</span><strong id="summary-confirm">0</strong></article>
-          <article><span>等待压缩</span><strong id="summary-queued">0</strong></article>
-          <article><span>已完成</span><strong id="summary-completed">0</strong></article>
-          <article><span>原始总量</span><strong id="summary-bytes">0 B</strong></article>
-        </div>
-
-        <div class="queue-toolbar">
-          <button id="toggle-task-list" class="button ghost">折叠任务列表</button>
-          <span id="selection-count" class="selection-count">未选择任务</span>
-          <button id="remove-selected" class="button ghost" disabled>移除所选</button>
-          <button id="clear-duplicates" class="button ghost">清除可能重复</button>
-          <button id="confirm-all-duplicates" class="button ghost">同意全部重复</button>
-          <button id="clear-completed" class="button ghost">清空已完成队列</button>
-          <button id="clear-queue" class="button danger">一键清空队列</button>
-        </div>
-
-        <div id="task-list-container" class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th class="select-cell"><input id="select-all-tasks" type="checkbox" aria-label="选择全部任务"></th>
-                <th>任务</th>
-                <th>文件</th>
-                <th>大小</th>
-                <th>状态</th>
-                <th>进度</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody id="task-list"></tbody>
-          </table>
-          <div id="empty-tasks" class="empty-state">还没有任务。选择一个实际主目录后开始扫描。</div>
-        </div>
-
-        <div id="loose-summary" class="loose-summary" hidden></div>
-      </section>
-
-      <section class="panel log-panel">
-        <div class="section-title small">
-          <div>
-            <p class="step">03 / 运行记录</p>
-            <h2>发生了什么</h2>
-          </div>
-          <span id="running-indicator" class="running-indicator">空闲</span>
-        </div>
-        <div id="log-list" class="log-list"><p class="muted">暂无日志</p></div>
-      </section>
+      </div>
     </div>
 
     <div id="library-page" class="app-page" hidden>
-      <section class="panel library-panel">
+      <section class="library-shell">
         <section class="warehouse-overview" aria-labelledby="warehouse-overview-title">
-          <div class="warehouse-overview-head">
-            <div>
-              <p id="warehouse-overview-title" class="step">仓库活跃度 / ACTIVITY</p>
-              <h2>仓库概览</h2>
-            </div>
-            <div class="discovery-actions">
-              <button id="export-warehouse" class="button ghost" type="button">导出仓库</button>
-              <button id="import-warehouse" class="button ghost" type="button">并入外部仓库</button>
-              <button id="random-walk" class="button secondary" type="button">随机漫步 · 换一个</button>
-            </div>
-          </div>
           <div class="warehouse-overview-body">
             <section class="warehouse-summary">
+              <div class="warehouse-overview-head">
+                <h2 id="warehouse-overview-title">仓库概览</h2>
+                <div class="discovery-actions">
+                  <button id="export-warehouse" class="button ghost" type="button">导出仓库</button>
+                  <button id="import-warehouse" class="button ghost" type="button">并入外部仓库</button>
+                  <button id="random-walk" class="button secondary" type="button">随机漫步 · 换一个</button>
+                </div>
+              </div>
               <div class="warehouse-metrics">
                 <div><strong id="metric-inventory">0</strong><span>库存</span></div>
                 <div><strong id="metric-tags">0</strong><span>标签</span></div>
                 <div><strong id="metric-gb">0</strong><span>GB</span></div>
+                <div><strong id="metric-week">0</strong><span>本周入库</span></div>
               </div>
               <section class="activity-panel">
                 <div class="activity-panel-head">
@@ -302,70 +284,61 @@
           </div>
         </section>
 
-        <div class="section-title library-title">
-          <div>
-            <p class="step">仓库 / WAREHOUSE</p>
-            <h2>浏览、分类并整理已入库内容</h2>
+        <div class="library-toolbar" aria-label="仓库筛选与视图工具">
+          <div class="catalog-search-wrap search-wrap">
+            <svg class="search-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6"></circle><path d="m10.6 10.6 3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
+            <input id="catalog-search" class="search-input" type="search" autocomplete="off" placeholder="模糊搜索标题、标签、备份位置、路径…">
+            <div id="catalog-suggestions" class="catalog-suggestions" hidden></div>
           </div>
-          <div class="library-actions">
-            <div class="library-action-row library-filter-row">
-              <div class="catalog-search-wrap">
-                <input id="catalog-search" class="search-input" type="search" autocomplete="off" placeholder="模糊搜索标题、标签、备份位置、路径…">
-                <div id="catalog-suggestions" class="catalog-suggestions" hidden></div>
-              </div>
-              <select id="catalog-tag-filter" class="filter-select" aria-label="按标签筛选">
-                <option value="">全部标签</option>
-              </select>
-              <select id="catalog-backup-filter" class="filter-select" aria-label="按备份位置筛选">
-                <option value="">全部备份位置</option>
-              </select>
-              <select id="catalog-rating-filter" class="filter-select" aria-label="按星级筛选">
-                <option value="">全部星级</option>
-                <option value="5">★★★★★</option>
-                <option value="4">★★★★</option>
-                <option value="3">★★★</option>
-                <option value="2">★★</option>
-                <option value="1">★</option>
-                <option value="0">未评分</option>
-              </select>
-            </div>
-            <div class="library-action-row library-tool-row">
-              <select id="catalog-sort" class="filter-select" aria-label="仓库排序">
-                <option value="inventory_desc">入库时间：新到旧</option>
-                <option value="inventory_asc">入库时间：旧到新</option>
-                <option value="name_asc">文件名：正序</option>
-                <option value="name_desc">文件名：倒序</option>
-              </select>
-              <div class="view-switch" role="group" aria-label="仓库视图">
-                <button id="catalog-list-view" class="button ghost" type="button">列表</button>
-                <button id="catalog-grid-view" class="button ghost active" type="button">大缩略图</button>
-              </div>
-              <button id="refresh-catalog" class="button ghost" type="button">刷新仓库</button>
-              <button id="set-warehouse-location" class="button ghost" type="button">设置仓库位置</button>
-              <button id="open-warehouse" class="button ghost" type="button">在文件浏览器中查看仓库</button>
-            </div>
-            <span id="warehouse-path" class="warehouse-path" title="当前仓库位置"></span>
+          <select id="catalog-tag-filter" class="filter-select" aria-label="按标签筛选"><option value="">全部标签</option></select>
+          <select id="catalog-backup-filter" class="filter-select" aria-label="按备份位置筛选"><option value="">全部备份位置</option></select>
+          <select id="catalog-rating-filter" class="filter-select" aria-label="按星级筛选">
+            <option value="">全部星级</option><option value="5">★★★★★</option><option value="4">★★★★</option><option value="3">★★★</option><option value="2">★★</option><option value="1">★</option><option value="0">未评分</option>
+          </select>
+          <span class="toolbar-spacer"></span>
+          <select id="catalog-sort" class="filter-select" aria-label="仓库排序">
+            <option value="inventory_desc">入库时间：新到旧</option><option value="inventory_asc">入库时间：旧到新</option><option value="name_asc">文件名：正序</option><option value="name_desc">文件名：倒序</option>
+          </select>
+          <div class="view-switch" role="group" aria-label="仓库视图">
+            <button id="catalog-list-view" class="view-button" type="button" title="文本列表" aria-label="文本列表"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11M2.5 8h11M2.5 12.5h11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path></svg></button>
+            <button id="catalog-grid-view" class="view-button active" type="button" title="大缩略图" aria-label="大缩略图"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.2" y="2.2" width="5" height="5" rx="1.2"></rect><rect x="8.8" y="2.2" width="5" height="5" rx="1.2"></rect><rect x="2.2" y="8.8" width="5" height="5" rx="1.2"></rect><rect x="8.8" y="8.8" width="5" height="5" rx="1.2"></rect></svg></button>
           </div>
+          <details class="action-menu library-tools-menu">
+            <summary class="button ghost">仓库工具</summary>
+            <div class="action-menu-popover">
+              <button id="refresh-catalog" class="menu-button" type="button">刷新仓库</button>
+              <button id="set-warehouse-location" class="menu-button" type="button">设置仓库位置</button>
+              <button id="open-warehouse" class="menu-button" type="button">在文件浏览器中查看仓库</button>
+            </div>
+          </details>
         </div>
+        <div class="warehouse-path-row" hidden><span id="warehouse-path" class="warehouse-path"></span></div>
 
         <div class="warehouse-bulkbar">
-          <label class="warehouse-select-all"><input id="select-all-catalog" type="checkbox">选择当前结果</label>
-          <span id="catalog-selection-count" class="selection-count">未选择仓库内容</span>
-          <button id="add-tags-selected" class="button ghost" type="button" disabled>批量追加标签</button>
-          <button id="update-backup-selected" class="button ghost" type="button" disabled>批量修改备份位置</button>
+          <label class="warehouse-select-all"><input id="select-all-catalog" type="checkbox">选择当前页</label>
+          <div id="catalog-selection-actions" class="context-actions">
+            <span id="catalog-selection-count" class="selection-count">已选 0 项</span>
+            <button id="add-tags-selected" class="button ghost" type="button" disabled>批量追加标签</button>
+            <button id="update-backup-selected" class="button ghost" type="button" disabled>批量修改备份位置</button>
+            <button id="compress-uncompressed-selected" class="button ghost" type="button" disabled>压缩入库</button>
+            <button id="delete-catalog-selected" class="button danger" type="button" disabled>删除所选</button>
+          </div>
+          <span class="toolbar-spacer"></span>
           <button id="undo-catalog" class="button ghost" type="button" disabled>撤回</button>
-          <button id="delete-catalog-selected" class="button danger" type="button" disabled>删除所选</button>
           <button id="add-manual-catalog" class="button secondary" type="button">手动新增库存</button>
         </div>
 
-        <nav id="catalog-pagination" class="catalog-pagination" aria-label="仓库分页" hidden>
-          <button id="catalog-page-prev" class="button ghost" type="button">上一页</button>
-          <span id="catalog-page-status">第 1 / 1 页</span>
-          <button id="catalog-page-next" class="button ghost" type="button">下一页</button>
-        </nav>
-
         <div id="library-layout" class="library-layout">
-          <aside id="catalog-list" class="catalog-list"><p class="muted">仓库中暂无归档记录</p></aside>
+          <section id="catalog-list" class="catalog-list" aria-label="仓库内容"><p class="muted">仓库中暂无归档记录</p></section>
+          <nav id="catalog-pagination" class="catalog-pagination" aria-label="仓库分页" hidden>
+            <button id="catalog-page-prev" class="button ghost" type="button">上一页</button>
+            <span id="catalog-page-status">第 1 / 1 页</span>
+            <label class="catalog-page-jump">跳到
+              <select id="catalog-page-select" aria-label="选择仓库页码"><option value="1">1</option></select>
+              页
+            </label>
+            <button id="catalog-page-next" class="button ghost" type="button">下一页</button>
+          </nav>
           <section id="catalog-detail" class="catalog-detail">
             <div class="empty-library">
               <strong>选择一条仓库记录</strong>
@@ -464,6 +437,24 @@
     </form>
   </dialog>
 
+  <dialog id="inventory-only-risk-dialog" class="manual-dialog compact-dialog risk-confirm-dialog">
+    <form id="inventory-only-risk-form">
+      <div class="dialog-heading"><div><p class="step">未压缩入库 / CAUTION</p><h2>确认不压缩直接入库</h2></div><button id="close-inventory-only-risk" class="dialog-close" type="button" aria-label="关闭">×</button></div>
+      <p class="dialog-help">本次入库将不会执行压缩，可能导致用户备份时出现遗漏，请确认风险。</p>
+      <label class="remember-risk-option"><input id="suppress-inventory-only-risk" type="checkbox"><span>不再提示</span></label>
+      <div class="dialog-actions"><button id="cancel-inventory-only-risk" class="button ghost" type="button">取消</button><button class="button warning" type="submit">确认并直接入库</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="catalog-compression-risk-dialog" class="manual-dialog compact-dialog risk-confirm-dialog">
+    <form id="catalog-compression-risk-form">
+      <div class="dialog-heading"><div><p class="step">库内项目压缩 / CAUTION</p><h2>把未压缩项目送入队列</h2></div><button id="close-catalog-compression-risk" class="dialog-close" type="button" aria-label="关闭">×</button></div>
+      <p class="dialog-help">本功能仅用于给库内“未压缩项目”压缩备份使用。</p>
+      <label class="remember-risk-option"><input id="suppress-catalog-compression-risk" type="checkbox"><span>不再提示</span></label>
+      <div class="dialog-actions"><button id="cancel-catalog-compression-risk" class="button ghost" type="button">取消</button><button class="button primary" type="submit">确认并送入队列</button></div>
+    </form>
+  </dialog>
+
   <dialog id="delete-catalog-dialog" class="manual-dialog compact-dialog">
     <form id="delete-catalog-form">
       <div class="dialog-heading"><div><p class="step">删除仓库项目</p><h2>确认删除所选内容</h2></div><button id="close-delete-catalog" class="dialog-close" type="button" aria-label="关闭">×</button></div>
@@ -498,6 +489,7 @@
   </dialog>
 
   <div id="toast" class="toast" hidden></div>
+  <script src="ui-state.js"></script>
   <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>

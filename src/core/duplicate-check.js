@@ -227,6 +227,152 @@ function findSimilarProjects(subject, candidates, ignoreTerms = []) {
   return matches.sort((a, b) => b.score - a.score).slice(0, 20);
 }
 
+function textMatchRanges(value, candidateValue, ignoreTerms = []) {
+  const source = String(value || '');
+  const candidate = String(candidateValue || '');
+  if (titleSimilarity(source, candidate, ignoreTerms) < 0.45) return [];
+
+  const ignored = parseSimilarityIgnoreTerms(ignoreTerms);
+  const isIgnored = (token) => ignored.some((term) => {
+    const compactTerm = term.replace(/[^\p{Script=Han}a-z0-9]+/gu, '');
+    const compactToken = token.toLocaleLowerCase().replace(/[^\p{Script=Han}a-z0-9]+/gu, '');
+    return compactTerm && (compactToken === compactTerm || compactToken.includes(compactTerm));
+  });
+  const candidateParts = similarityParts(candidate, ignoreTerms);
+  const candidateHan = new Set(candidateParts.han);
+  const candidateWords = candidateParts.latinWords;
+  const ranges = [];
+
+  for (const match of source.matchAll(/[\p{Script=Han}]+|[a-z]{3,}/giu)) {
+    const token = match[0];
+    if (isIgnored(token)) continue;
+    if (/^\p{Script=Han}+$/u.test(token)) {
+      for (let offset = 0; offset < token.length; offset += 1) {
+        if (candidateHan.has(token[offset].normalize('NFKC').toLocaleLowerCase())) {
+          ranges.push([match.index + offset, match.index + offset + 1]);
+        }
+      }
+    } else {
+      const lower = token.normalize('NFKC').toLocaleLowerCase();
+      if (candidateWords.some((word) => word === lower ||
+          (word.length >= 5 && (word.includes(lower) || lower.includes(word))))) {
+        ranges.push([match.index, match.index + token.length]);
+      }
+    }
+  }
+
+  if (ranges.length === 0) return [[0, source.length]];
+  const merged = [];
+  for (const range of ranges.sort((left, right) => left[0] - right[0])) {
+    const previous = merged.at(-1);
+    if (previous && range[0] <= previous[1]) previous[1] = Math.max(previous[1], range[1]);
+    else merged.push([...range]);
+  }
+  return merged;
+}
+
+function entryName(relativePath) {
+  const parts = String(relativePath || '').split(/[\\/]/).filter(Boolean);
+  return parts.at(-1) || '';
+}
+
+function findSimilarEntryMatches(subject, candidates, ignoreTerms = []) {
+  const matches = new Map();
+  const subjectDirectories = (subject.directories || []).map((relativePath) => ({
+    kind: 'directory', relativePath: String(relativePath || ''), name: entryName(relativePath)
+  }));
+  const subjectFiles = (subject.manifest || []).map((file) => ({
+    kind: 'file', relativePath: String(file.relativePath || ''), name: file.name || entryName(file.relativePath), file
+  }));
+
+  const textIndex = new Map();
+  const exactFileIndex = new Map();
+  const videoSizeIndex = new Map();
+  const addIndex = (index, key, entry) => {
+    if (!key) return;
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push(entry);
+  };
+  for (const candidate of candidates || []) {
+    const common = { recordId: candidate.id, title: candidate.title || candidate.displayName || '' };
+    for (const relativePath of candidate.directories || []) {
+      const entry = { ...common, kind: 'directory', relativePath: String(relativePath || ''), name: entryName(relativePath) };
+      for (const key of similarityCandidateKeys({ title: entry.name }, ignoreTerms)) addIndex(textIndex, `directory:${key}`, entry);
+    }
+    for (const file of candidate.manifest || []) {
+      const entry = { ...common, kind: 'file', relativePath: String(file.relativePath || ''), name: file.name || entryName(file.relativePath), file };
+      for (const key of similarityCandidateKeys({ title: entry.name }, ignoreTerms)) addIndex(textIndex, `file:${key}`, entry);
+      if (file.md5 && Number(file.size) >= 0) addIndex(exactFileIndex, `${Number(file.size)}:${String(file.md5).toLocaleLowerCase()}`, entry);
+      if (VIDEO_EXTENSIONS.has(String(file.extension || path.extname(entry.name)).toLocaleLowerCase()) && Number(file.size) > 0) {
+        addIndex(videoSizeIndex, String(Number(file.size)), entry);
+      }
+    }
+  }
+
+  for (const sourceDirectory of subjectDirectories) {
+    const targets = new Set(similarityCandidateKeys({ title: sourceDirectory.name }, ignoreTerms)
+      .flatMap((key) => textIndex.get(`directory:${key}`) || []));
+    for (const targetDirectory of targets) {
+      const ranges = textMatchRanges(sourceDirectory.name, targetDirectory.name, ignoreTerms);
+      if (ranges.length === 0) continue;
+      const key = `directory:${sourceDirectory.relativePath}`;
+      const current = matches.get(key) || { kind: 'directory', relativePath: sourceDirectory.relativePath, ranges: [], matches: [] };
+      current.ranges.push(...ranges);
+      current.matches.push({ recordId: targetDirectory.recordId, title: targetDirectory.title, relativePath: targetDirectory.relativePath, reason: '目录名相似' });
+      matches.set(key, current);
+    }
+  }
+
+  for (const sourceFile of subjectFiles) {
+    const targets = new Set(similarityCandidateKeys({ title: sourceFile.name }, ignoreTerms)
+      .flatMap((key) => textIndex.get(`file:${key}`) || []));
+    if (sourceFile.file.md5) {
+      for (const target of exactFileIndex.get(`${Number(sourceFile.file.size)}:${String(sourceFile.file.md5).toLocaleLowerCase()}`) || []) targets.add(target);
+    }
+    if (VIDEO_EXTENSIONS.has(String(sourceFile.file.extension || path.extname(sourceFile.name)).toLocaleLowerCase()) && Number(sourceFile.file.size) > 0) {
+      for (const target of videoSizeIndex.get(String(Number(sourceFile.file.size))) || []) targets.add(target);
+    }
+    for (const targetFile of targets) {
+        const exactContent = sourceFile.file.md5 && targetFile.file.md5 &&
+          String(sourceFile.file.md5).toLocaleLowerCase() === String(targetFile.file.md5).toLocaleLowerCase() &&
+          Number(sourceFile.file.size) === Number(targetFile.file.size);
+        const sameVideoSize = VIDEO_EXTENSIONS.has(String(sourceFile.file.extension || path.extname(sourceFile.name)).toLocaleLowerCase()) &&
+          VIDEO_EXTENSIONS.has(String(targetFile.file.extension || path.extname(targetFile.name)).toLocaleLowerCase()) &&
+          Number(sourceFile.file.size) > 0 && Number(sourceFile.file.size) === Number(targetFile.file.size);
+        const ranges = exactContent || sameVideoSize
+          ? [[0, sourceFile.name.length]]
+          : textMatchRanges(sourceFile.name, targetFile.name, ignoreTerms);
+        if (ranges.length === 0) continue;
+        const key = `file:${sourceFile.relativePath}`;
+        const current = matches.get(key) || { kind: 'file', relativePath: sourceFile.relativePath, ranges: [], matches: [] };
+        current.ranges.push(...ranges);
+        current.matches.push({
+          recordId: targetFile.recordId,
+          title: targetFile.title,
+          relativePath: targetFile.relativePath,
+          reason: exactContent ? '文件内容完全一致' : sameVideoSize ? '视频大小完全一致' : '文件名相似'
+        });
+        matches.set(key, current);
+    }
+  }
+
+  return [...matches.values()].map((entry) => {
+    const merged = [];
+    for (const range of entry.ranges.sort((left, right) => left[0] - right[0])) {
+      const previous = merged.at(-1);
+      if (previous && range[0] <= previous[1]) previous[1] = Math.max(previous[1], range[1]);
+      else merged.push([...range]);
+    }
+    return {
+      ...entry,
+      ranges: merged,
+      matches: entry.matches.filter((match, index, items) => items.findIndex((candidate) =>
+        candidate.recordId === match.recordId && candidate.relativePath === match.relativePath && candidate.reason === match.reason
+      ) === index).slice(0, 20)
+    };
+  });
+}
+
 function fuzzyTextScore(query, text) {
   const needle = similarityParts(query).compact;
   const haystack = similarityParts(text).compact;
@@ -250,6 +396,7 @@ function fuzzyTextScore(query, text) {
 module.exports = {
   DEFAULT_SIMILARITY_IGNORE_TERMS,
   findExactFileMatches,
+  findSimilarEntryMatches,
   findSimilarProjects,
   findTaskNameMatches,
   fuzzyTextScore,

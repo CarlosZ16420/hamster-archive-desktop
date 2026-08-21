@@ -148,8 +148,10 @@ function loadCatalog(database) {
     .map((row) => JSON.parse(row.record_json));
 }
 
-function saveCatalog(database, records) {
+function saveCatalog(database, records, options = {}) {
   const normalized = Array.isArray(records) ? records : [];
+  const deleteMissing = options.deleteMissing !== false;
+  const sortIndexById = options.sortIndexById instanceof Map ? options.sortIndexById : null;
   const existing = new Map(database.prepare('SELECT id, content_hash, sort_index FROM catalog_records').all()
     .map((row) => [row.id, row]));
   const keepIds = new Set();
@@ -199,13 +201,14 @@ function saveCatalog(database, records) {
       const json = stableJson(record);
       const hash = contentHash(json);
       const previous = existing.get(id);
+      const sortIndex = sortIndexById?.get(id) ?? index;
       if (previous?.content_hash === hash && indexedIds.has(id)) {
-        if (Number(previous.sort_index) !== index) updateSortIndex.run(index, id);
+        if (Number(previous.sort_index) !== sortIndex) updateSortIndex.run(sortIndex, id);
         continue;
       }
       upsertRecord.run(
         id,
-        index,
+        sortIndex,
         String(record.title || ''),
         String(record.displayName || ''),
         String(record.inventoryDate || record.completedAt || ''),
@@ -249,7 +252,7 @@ function saveCatalog(database, records) {
       for (const key of similarityCandidateKeys(record, [])) insertSimilarityKey.run(id, key);
       changed += 1;
     }
-    for (const id of existing.keys()) {
+    if (deleteMissing) for (const id of existing.keys()) {
       if (!keepIds.has(id)) {
         deleteRecord.run(id);
         changed += 1;
@@ -257,6 +260,10 @@ function saveCatalog(database, records) {
     }
     return { changed, total: normalized.length };
   });
+}
+
+function saveCatalogRecords(database, records, sortIndexById) {
+  return saveCatalog(database, records, { deleteMissing: false, sortIndexById });
 }
 
 function queryIdsByValues(database, table, column, values, limit = 2000) {
@@ -392,6 +399,7 @@ module.exports = {
   loadJobs,
   openRepository,
   saveCatalog,
+  saveCatalogRecords,
   saveJobs,
   searchGrams,
   stableJson,

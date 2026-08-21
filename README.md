@@ -10,7 +10,7 @@ Local-first batch archiver and searchable media vault for Windows.
 
 本地优先 · 批量归档 · 媒体预览 · 便携数据
 
-![Version](https://img.shields.io/badge/version-4.2.0-d45f3c?style=flat-square)
+![Version](https://img.shields.io/badge/version-4.4.7-d45f3c?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-23211d?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-2f7558?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-43-456f83?style=flat-square)
@@ -43,7 +43,7 @@ Local-first batch archiver and searchable media vault for Windows.
 
 - 主目录中的每个一级文件夹或视频，分别成为一个任务；也可直接拖入单项。
 - 生成目录清单、**自动截取各类媒体缩略图**和信息，随后用 SQLite 建立本地索引。
-- 大任务自动按 10 GiB 分卷；密码、备份位置、标签、星级和备注可随项目记录。
+- 可在 64 MiB—10 GiB 范围内设置单卷大小，默认 10 GiB；即使关闭主动分卷，超过 10 GiB 的任务仍会在确认后安全分卷。密码、备份位置、标签、星级和备注可随项目记录。
 - 疑似重复、大任务和体积异常会停下来等待人工确认。
 - 只有压缩、验证和入库完成后，才会按设置保留、移动或回收原文件。
 
@@ -57,11 +57,9 @@ Local-first batch archiver and searchable media vault for Windows.
 
 ## 仓库
 
-仓库不是一张压缩包清单。它提供封面浏览、活跃度统计和随机漫步。搜索覆盖标题、标签、备注、路径与文件名；列表分页，目录树按可视区域渲染，适合逐渐增长的库存。
+仓库不是一张压缩包清单。它提供封面浏览、活跃度统计和随机漫步。搜索覆盖标题、标签、备注、路径与文件名；列表分页按可视区域渲染，适合逐渐增长的库存。
 
-仓库支持白昼与黑夜主题；活跃度按每日入库项目数分级，达到 100 项/天才使用最深颜色。
-
-项目中不仅包含了视频、图片的缩略截图，还包含完整的目录结构。每张图片都是恰到好处的缩略图，保存信息的同时也控制自身体积。
+项目中不仅包含了视频、图片的缩略截图，还包含完整的目录结构。每张图片都是缩略图，保存信息的同时也控制自身体积。
 
 视频截取帧数、项目保存缩略图个数等参数均自由可调。
 
@@ -120,6 +118,8 @@ Local-first batch archiver and searchable media vault for Windows.
 
 如果应用提示自动更新没有完成，旧版本不会被删除，可以继续使用。建议按下面的方式迁移，直接复制便携数据比重新导入仓库更完整：
 
+更新检查使用公开 Release 渠道；源代码和开发提交保存在私人仓库。4.2.0 及更早版本仍固定检查旧的公开 Release，在公开渠道出现 4.4.x 之前不会看到新版本。若 4.2.0 没有发现更新，请按下面的手动步骤迁移；新版本会在下载前校验 ZIP 的 SHA256，并在替换或启动验证失败时回滚。
+
 1. 在旧版本的“仓库”中先导出一次仓库作为保险，然后完全退出应用。
 2. 从 [Releases](../../releases) 下载最新 Windows x64 压缩包，完整解压到一个**新文件夹**；不要只替换 EXE，也不要覆盖仍在运行的旧目录。
 3. 确认两个版本都已关闭，把旧版本目录中的 `userdata` 整个复制到新版本目录，覆盖新版本中尚为空白的 `userdata`。
@@ -146,7 +146,7 @@ npm start
 ## 便携数据布局
 
 ```text
-HamsterArchiver-v4.2.0-win-x64/
+HamsterArchiver-v4.4.7-win-x64/
 ├─ HamsterArchiver.exe
 ├─ tools/
 │  ├─ 7zip/
@@ -170,7 +170,7 @@ HamsterArchiver-v4.2.0-win-x64/
 |---|---|
 | 桌面端 | Electron 43、上下文隔离、sandbox、严格 CSP |
 | 数据 | Node 内置 SQLite、WAL、事务、FTS5 |
-| 压缩 | 便携版 7-Zip、7z/ZIP、10 GiB 分卷、可选密码、完整性测试 |
+| 压缩 | 便携版 7-Zip、7z/ZIP、64 MiB—10 GiB 可配置分卷、可选密码、完整性测试 |
 | 媒体 | 单个 FFmpeg 程序完成探测与抽帧 |
 | 性能 | 仓库分页、目录虚拟化、持久化搜索与相似候选索引 |
 | 隐私 | 用户数据留在本机；不上传仓库、媒体或密码 |

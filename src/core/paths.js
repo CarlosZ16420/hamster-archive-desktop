@@ -2,7 +2,7 @@
 
 const crypto = require('node:crypto');
 const path = require('node:path');
-const { ARCHIVE_PASSWORD, MIB } = require('./constants');
+const { ARCHIVE_PASSWORD, LARGE_TASK_BYTES, MIB } = require('./constants');
 
 const PORTABLE_SEVEN_ZIP_PATH = path.join('tools', '7zip', '7z.exe');
 const PORTABLE_FFMPEG_PATH = path.join('tools', 'ffmpeg', 'ffmpeg.exe');
@@ -120,6 +120,8 @@ function makeDefaultConfig(workspaceRoot, userDataLayout = {}) {
     thumbnailLimit: 30,
     archiveFormat: '7z',
     compressionLevel: 1,
+    archiveVolumeEnabled: true,
+    archiveVolumeBytes: LARGE_TASK_BYTES,
     smallItemFilter: true,
     minimumTaskBytes: 100 * MIB,
     scheduleEnabled: false,
@@ -130,7 +132,9 @@ function makeDefaultConfig(workspaceRoot, userDataLayout = {}) {
     autoTrashCompleted: false,
     recordBackupLocation: false,
     backupLocation: '',
-    recordArchivePassword: true
+    recordArchivePassword: true,
+    suppressInventoryOnlyRisk: false,
+    suppressCatalogCompressionRisk: false
   };
 }
 

@@ -23,6 +23,28 @@ test('manual update check reports a newer GitHub release', async () => {
   assert.equal(result.latestVersion, '2.0.0');
 });
 
+test('4.2.0-era clients recognize v-prefixed 4.4.x releases', async () => {
+  const result = await checkForUpdates({
+    currentVersion: '4.2.0',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        tag_name: 'v4.4.2',
+        assets: [{
+          name: 'HamsterArchiver-v4.4.2-win-x64.zip',
+          browser_download_url: 'https://github.com/CarlosZ16420/hamster-archiver/releases/download/v4.4.2/HamsterArchiver-v4.4.2-win-x64.zip',
+          size: 123,
+          digest: 'sha256:' + 'b'.repeat(64)
+        }]
+      })
+    })
+  });
+  assert.equal(result.latestVersion, '4.4.2');
+  assert.equal(result.updateAvailable, true);
+  assert.equal(result.installable, true);
+});
+
 test('update metadata exposes a matching Windows asset for installation', async () => {
   const result = await checkForUpdates({
     currentVersion: '4.0.0',
@@ -37,6 +59,9 @@ test('update metadata exposes a matching Windows asset for installation', async 
           browser_download_url: 'https://github.com/CarlosZ16420/hamster-archiver/releases/download/v4.0.1/HamsterArchiver-v4.0.1-win-x64.zip',
           size: 123,
           digest: 'sha256:' + 'a'.repeat(64)
+        }, {
+          name: 'HamsterArchiver-v4.0.1-win-x64.zip.sha256',
+          browser_download_url: 'https://github.com/CarlosZ16420/hamster-archiver/releases/download/v4.0.1/HamsterArchiver-v4.0.1-win-x64.zip.sha256'
         }]
       })
     })
@@ -44,6 +69,29 @@ test('update metadata exposes a matching Windows asset for installation', async 
   assert.equal(result.installable, true);
   assert.equal(result.asset.name, 'HamsterArchiver-v4.0.1-win-x64.zip');
   assert.equal(result.asset.size, 123);
+  assert.match(result.asset.digestDownloadUrl, /\.zip\.sha256$/);
+});
+
+test('update metadata can provide a sidecar digest when GitHub omits asset.digest', async () => {
+  const result = await checkForUpdates({
+    currentVersion: '4.0.0',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        tag_name: 'v4.0.1',
+        assets: [{
+          name: 'HamsterArchiver-v4.0.1-win-x64.zip',
+          browser_download_url: 'https://github.com/CarlosZ16420/hamster-archiver/releases/download/v4.0.1/HamsterArchiver-v4.0.1-win-x64.zip'
+        }, {
+          name: 'HamsterArchiver-v4.0.1-win-x64.zip.sha256',
+          browser_download_url: 'https://github.com/CarlosZ16420/hamster-archiver/releases/download/v4.0.1/HamsterArchiver-v4.0.1-win-x64.zip.sha256'
+        }]
+      })
+    })
+  });
+  assert.equal(result.asset.digest, '');
+  assert.ok(result.asset.digestDownloadUrl);
 });
 
 test('update metadata ignores legacy or unrelated ZIP assets', async () => {

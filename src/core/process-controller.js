@@ -3,23 +3,45 @@
 const { spawn } = require('node:child_process');
 const { CancelledError } = require('./archive-engine-errors');
 
-function runPowerShellEncoded(script) {
+const PROCESS_CONTROL_TIMEOUT_MS = 8_000;
+
+function runPowerShellEncoded(script, {
+  spawnImpl = spawn,
+  timeoutMs = PROCESS_CONTROL_TIMEOUT_MS
+} = {}) {
   const encoded = Buffer.from(script, 'utf16le').toString('base64');
   return new Promise((resolve, reject) => {
-    const child = spawn('powershell.exe', [
+    const child = spawnImpl('powershell.exe', [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded
     ], {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     });
     let output = '';
-    child.stdout.on('data', (chunk) => { output += chunk.toString('utf8'); });
-    child.stderr.on('data', (chunk) => { output += chunk.toString('utf8'); });
-    child.on('error', reject);
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    };
+    const appendOutput = (chunk) => {
+      output = `${output}${chunk.toString('utf8')}`.slice(-64 * 1024);
+    };
+    child.stdout?.on('data', appendOutput);
+    child.stderr?.on('data', appendOutput);
+    child.on('error', finish);
     child.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`Windows 进程控制失败（${code}）：${output.trim()}`));
+      if (code === 0) finish();
+      else finish(new Error(`Windows 进程控制失败（${code}）：${output.trim()}`));
     });
+    const timer = setTimeout(() => {
+      const error = new Error(`Windows 进程控制在 ${Math.ceil(timeoutMs / 1000)} 秒内没有响应，已停止等待。`);
+      error.code = 'PROCESS_CONTROL_TIMEOUT';
+      finish(error);
+      try { child.kill(); } catch {}
+    }, timeoutMs);
   });
 }
 
@@ -112,4 +134,9 @@ class PauseController {
   }
 }
 
-module.exports = { PauseController, controlWindowsProcess, runPowerShellEncoded };
+module.exports = {
+  PROCESS_CONTROL_TIMEOUT_MS,
+  PauseController,
+  controlWindowsProcess,
+  runPowerShellEncoded
+};

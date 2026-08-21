@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   findExactFileMatches,
+  findSimilarEntryMatches,
   findSimilarProjects,
   findTaskNameMatches,
   fuzzyTextScore,
@@ -68,6 +69,29 @@ test('similarity ignore terms remove common maker-name noise without changing ex
   }], ['FC2', 'PPV']);
   assert.equal(matches.length, 1);
   assert.ok(matches[0].reasons.includes('视频大小完全一致'));
+});
+
+test('similarity ignore terms are case-insensitive', () => {
+  assert.equal(titleSimilarity('ONLY 东京旅行', 'only 大阪旅行', ['Only']), 0);
+  assert.equal(
+    similarityCandidateKeys({ title: 'ONLY-12345' }, ['only']).some((key) => key.startsWith('text:') || key.startsWith('word:')),
+    false
+  );
+});
+
+test('similar directory entries report exact paths and highlight ranges', () => {
+  const subject = {
+    directories: ['旅行/王佳乐北京学习'],
+    manifest: [{ relativePath: '旅行/台湾旅行记录.mp4', name: '台湾旅行记录.mp4', extension: '.mp4', size: 20, md5: 'abc' }]
+  };
+  const candidate = {
+    id: 'other', title: '另一项目', directories: ['整理/北京王佳乐学习生活'],
+    manifest: [{ relativePath: '整理/台湾旅行记录-备份.mp4', name: '台湾旅行记录-备份.mp4', extension: '.mp4', size: 20, md5: 'abc' }]
+  };
+  const matches = findSimilarEntryMatches(subject, [candidate], []);
+  assert.ok(matches.some((entry) => entry.kind === 'directory' && entry.relativePath === '旅行/王佳乐北京学习' && entry.ranges.length > 0));
+  assert.ok(matches.some((entry) => entry.kind === 'file' && entry.relativePath === '旅行/台湾旅行记录.mp4' &&
+    entry.matches.some((match) => match.reason === '文件内容完全一致')));
 });
 
 test('ignored FC2 identifiers and shared download domains never create title similarity', () => {

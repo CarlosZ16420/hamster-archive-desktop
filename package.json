@@ -1,6 +1,6 @@
 {
   "name": "hamster-archiver",
-  "version": "4.2.0",
+  "version": "4.4.7",
   "private": true,
   "license": "MIT",
   "description": "Hamster Archiver：本地优先的归档与备份管理工具",
@@ -16,7 +16,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test \"test/**/*.test.js\"",
-    "check": "node --check src/main.js && node --check src/preload.js && node --check src/renderer/i18n.js && node --check src/renderer/app.js && node --check src/core/archive-engine.js && node --check src/core/queue-manager.js && node --check src/core/storage-paths.js && node --check src/core/storage-migration.js && node --check src/core/sqlite-repository.js && node --check src/core/media-service.js && node --check src/core/recycle-bin.js && node --check src/core/update-checker.js && node --check src/core/update-manager.js && node --check scripts/migrate-saves-to-sqlite.js && node --check scripts/migrate-to-portable-userdata.js && node --check scripts/generate-app-icon.js && node --check scripts/embed-windows-icon.js && node --check scripts/build-release.js && node --check scripts/check-publish-safety.js",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/renderer/ui-state.js && node --check src/renderer/i18n.js && node --check src/renderer/app.js && node --check src/core/archive-engine.js && node --check src/core/queue-manager.js && node --check src/core/storage-paths.js && node --check src/core/storage-migration.js && node --check src/core/sqlite-repository.js && node --check src/core/media-service.js && node --check src/core/recycle-bin.js && node --check src/core/update-checker.js && node --check src/core/update-manager.js && node --check scripts/migrate-saves-to-sqlite.js && node --check scripts/migrate-to-portable-userdata.js && node --check scripts/generate-app-icon.js && node --check scripts/embed-windows-icon.js && node --check scripts/build-release.js && node --check scripts/check-publish-safety.js",
     "publish:check": "node scripts/check-publish-safety.js",
     "migrate:portable": "node scripts/migrate-to-portable-userdata.js",
     "icon:build": "electron scripts/generate-app-icon.js",

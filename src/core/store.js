@@ -14,6 +14,7 @@ const {
   loadJobs: loadJobsFromDatabase,
   openRepository,
   saveCatalog: saveCatalogToDatabase,
+  saveCatalogRecords: saveCatalogRecordsToDatabase,
   saveJobs: saveJobsToDatabase
 } = require('./sqlite-repository');
 
@@ -104,6 +105,11 @@ class AppStore {
 
   async saveCatalog(repositoryDirectory, records) {
     return saveCatalogToDatabase(this.getRepository(repositoryDirectory).database, records);
+  }
+
+  async saveCatalogRecords(repositoryDirectory, records, allRecords = records) {
+    const sortIndexById = new Map((allRecords || []).map((record, index) => [String(record.id), index]));
+    return saveCatalogRecordsToDatabase(this.getRepository(repositoryDirectory).database, records, sortIndexById);
   }
 
   findCatalogIdsByExactName(repositoryDirectory, nameKey, limit) {

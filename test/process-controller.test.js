@@ -2,8 +2,9 @@
 
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
+const { EventEmitter } = require('node:events');
 const test = require('node:test');
-const { PauseController } = require('../src/core/process-controller');
+const { PauseController, runPowerShellEncoded } = require('../src/core/process-controller');
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -23,6 +24,19 @@ test('cooperative pause blocks and resume releases work', async () => {
     { pid: 1234, action: 'suspend' },
     { pid: 1234, action: 'resume' }
   ]);
+});
+
+test('Windows process control stops waiting after its timeout', async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  let killed = false;
+  child.kill = () => { killed = true; };
+  await assert.rejects(() => runPowerShellEncoded('Get-Process', {
+    spawnImpl: () => child,
+    timeoutMs: 15
+  }), (error) => error.code === 'PROCESS_CONTROL_TIMEOUT');
+  assert.equal(killed, true);
 });
 
 test('Windows native pause suspends and resumes a real child process', {

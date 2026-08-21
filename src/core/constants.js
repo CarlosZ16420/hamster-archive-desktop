@@ -5,6 +5,8 @@ const path = require('node:path');
 const GIB = 1024 ** 3;
 const MIB = 1024 ** 2;
 const LARGE_TASK_BYTES = 10 * GIB;
+const MIN_ARCHIVE_VOLUME_BYTES = 64 * MIB;
+const MAX_ARCHIVE_VOLUME_BYTES = LARGE_TASK_BYTES;
 const ARCHIVE_PASSWORD = '';
 const PASSWORD_SCHEME = 'configured-v1';
 
@@ -36,6 +38,8 @@ module.exports = {
   IMAGE_EXTENSIONS,
   MIB,
   LARGE_TASK_BYTES,
+  MAX_ARCHIVE_VOLUME_BYTES,
+  MIN_ARCHIVE_VOLUME_BYTES,
   PASSWORD_SCHEME,
   RUNNING_STATUSES,
   TERMINAL_STATUSES,

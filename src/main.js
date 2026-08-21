@@ -16,7 +16,7 @@ const {
   resolveApplicationPath
 } = require('./core/paths');
 const { makeUserDataLayout } = require('./core/storage-paths');
-const { IMAGE_EXTENSIONS, isVideoFile } = require('./core/constants');
+const { IMAGE_EXTENSIONS, LARGE_TASK_BYTES, isVideoFile } = require('./core/constants');
 const { extractVideoFrames } = require('./core/media-service');
 const { checkForUpdates } = require('./core/update-checker');
 const {
@@ -268,11 +268,16 @@ function createWindow() {
     event.preventDefault();
     if (closePromptOpen) return;
     closePromptOpen = true;
+    const paused = Boolean(queueManager.paused);
     const result = await dialog.showMessageBox(mainWindow, {
       type: 'warning',
       title: '归档任务仍在运行',
-      message: '现在退出会停止整个归档队列。源文件不会被修改。',
-      detail: '当前压缩会安全取消，尚未开始的任务会保留在列表中，下次打开可继续。若正在移动已验证成品，程序会先完成入库记录再退出。',
+      message: paused
+        ? '当前任务已暂停。现在退出会取消当前任务，源文件不会被修改。'
+        : '现在退出会停止整个归档队列。源文件不会被修改。',
+      detail: paused
+        ? '当前任务下次打开后可从“已取消”状态重试；尚未开始的任务会保留在列表中。选择“继续运行”可返回应用。'
+        : '当前压缩会安全取消，尚未开始的任务会保留在列表中，下次打开可继续。若正在移动已验证成品，程序会先完成入库记录再退出。',
       buttons: ['继续运行', '停止队列并退出'],
       defaultId: 0,
       cancelId: 0,
@@ -291,12 +296,12 @@ function createWindow() {
       const bridgeStatus = await mainWindow.webContents.executeJavaScript(`(() => {
         const required = [
           'getState', 'chooseDirectory', 'chooseProgram', 'changeWarehouseLocation', 'openWarehouse', 'exportWarehouse', 'importWarehouse', 'checkForUpdates', 'openUserData', 'openExternal', 'copyText', 'chooseSingle', 'saveConfig', 'scanSource',
-          'addSingle', 'openTaskSource', 'getDroppedPath', 'confirmTask', 'confirmAnomaly', 'acknowledgeTrashSafety', 'cancelTask', 'retryTask', 'startQueue',
-          'discardAnomaly', 'pauseQueue', 'resumeQueue', 'removeJobs', 'clearCompletedJobs', 'clearQueue', 'clearPotentialDuplicates', 'confirmAllDuplicates', 'finishNextAndPause', 'searchCatalog',
+          'addSingle', 'openTaskSource', 'getDroppedPath', 'confirmTask', 'confirmAnomaly', 'acknowledgeTrashSafety', 'cancelTask', 'retryTask', 'startQueue', 'startInventoryOnlyQueue',
+    'discardAnomaly', 'pauseQueue', 'resumeQueue', 'removeJobs', 'clearCompletedJobs', 'clearCancelledJobs', 'clearQueue', 'clearPotentialDuplicates', 'clearExactDuplicates', 'confirmAllDuplicates', 'finishNextAndPause', 'searchCatalog',
           'getCatalogSuggestions', 'openSimilarityIgnoreTerms', 'reloadSimilarityIgnoreTerms',
           'getWarehouseInsights', 'getRandomCatalogRecord',
           'getCatalogDetails', 'openCatalogSource', 'restoreCatalogSource', 'updateCatalogMetadata', 'recalculateCatalogSimilarity', 'removeCatalogSimilarity', 'addManualCatalogRecord', 'addCatalogImage',
-          'setCatalogCover', 'addTagsToCatalogRecords', 'updateBackupLocationForCatalogRecords', 'undoCatalogAction', 'deleteCatalogRecords', 'getThumbnail',
+          'setCatalogCover', 'addTagsToCatalogRecords', 'updateBackupLocationForCatalogRecords', 'queueCatalogRecordsForCompression', 'undoCatalogAction', 'deleteCatalogRecords', 'getThumbnail',
           'onStateChanged', 'onTaskProgress', 'onCatalogChanged', 'onScanProgress', 'onUpdateProgress'
         ];
         return {
@@ -313,10 +318,41 @@ function createWindow() {
       const ipcStatus = await mainWindow.webContents.executeJavaScript(`window.archiveApp.getState().then((state) => ({
         hasConfig: Boolean(state?.config),
         hasJobs: Array.isArray(state?.jobs),
-        hasCatalog: Array.isArray(state?.catalog)
+        hasCatalog: Array.isArray(state?.catalog),
+        archiveVolumeEnabled: state?.config?.archiveVolumeEnabled === true,
+        archiveVolumeBytes: Number(state?.config?.archiveVolumeBytes)
       }))`);
-      if (!ipcStatus.hasConfig || !ipcStatus.hasJobs || !ipcStatus.hasCatalog) {
-        console.error(`HAMSTER_IPC_TEST_FAILED ${JSON.stringify(ipcStatus)}`);
+      const expectedSourceState = ['trash', 'move', 'keep'].includes(process.env.HAMSTER_SMOKE_SOURCE_DISPOSITION)
+        ? process.env.HAMSTER_SMOKE_SOURCE_DISPOSITION
+        : 'move';
+      const expectedSourceLabels = {
+        trash: '归档后移入回收站',
+        move: '归档后移动原文件',
+        keep: '归档后不移动原文件'
+      };
+      const uiStatus = await mainWindow.webContents.executeJavaScript(`({
+        hasVolumeControls: Boolean(document.querySelector('#split-volume') && document.querySelector('#volume-size') && document.querySelector('#volume-unit')),
+        hasNoVolumeExample: !document.querySelector('#volume-hint') || !document.querySelector('#volume-hint')?.textContent,
+        compressionDigest: document.querySelector('#digest-compression')?.textContent || '',
+        sourceSafetyState: document.querySelector('#source-safety-chip')?.dataset.state || '',
+        sourceSafetyText: document.querySelector('#source-safety-label')?.textContent || '',
+        sourceDispositionStates: [
+          window.hamsterUiState?.sourceDispositionPresentation(true, false),
+          window.hamsterUiState?.sourceDispositionPresentation(false, true),
+          window.hamsterUiState?.sourceDispositionPresentation(false, false)
+        ]
+      })`);
+      if (!ipcStatus.hasConfig || !ipcStatus.hasJobs || !ipcStatus.hasCatalog ||
+          !ipcStatus.archiveVolumeEnabled || ipcStatus.archiveVolumeBytes !== LARGE_TASK_BYTES ||
+          !uiStatus.hasVolumeControls || !uiStatus.hasNoVolumeExample || !uiStatus.compressionDigest.includes('10 GB') ||
+          uiStatus.sourceSafetyState !== expectedSourceState ||
+          uiStatus.sourceSafetyText !== expectedSourceLabels[expectedSourceState] ||
+          JSON.stringify(uiStatus.sourceDispositionStates) !== JSON.stringify([
+            { state: 'trash', label: '归档后移入回收站' },
+            { state: 'move', label: '归档后移动原文件' },
+            { state: 'keep', label: '归档后不移动原文件' }
+          ])) {
+        console.error(`HAMSTER_IPC_TEST_FAILED ${JSON.stringify({ ipcStatus, uiStatus })}`);
         app.exitCode = 1;
         app.quit();
         return;
@@ -444,6 +480,23 @@ function createWindow() {
           return { coverRelativePath: record?.coverRelativePath, coverThumbnailRef: record?.coverThumbnailRef, coverThumbnailPath: record?.coverThumbnailPath };
         })`);
         await mainWindow.webContents.executeJavaScript(`document.querySelector('#close-thumbnail-lightbox')?.click()`);
+        await mainWindow.webContents.executeJavaScript(`document.querySelector('#catalog-list-view')?.click()`);
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const listViewStatus = await mainWindow.webContents.executeJavaScript(`(() => {
+          const list = document.querySelector('#catalog-list');
+          const detail = document.querySelector('#catalog-detail');
+          return {
+            rows: document.querySelectorAll('.catalog-text-row').length,
+            covers: document.querySelectorAll('.catalog-text-row .catalog-cover').length,
+            detailBelowList: Boolean(list && detail && detail.getBoundingClientRect().top >= list.getBoundingClientRect().bottom)
+          };
+        })()`);
+        await mainWindow.webContents.executeJavaScript(`document.querySelector('.catalog-text-open')?.click()`);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        listViewStatus.detailLoaded = await mainWindow.webContents.executeJavaScript(`Boolean(document.querySelector('#catalog-detail .archive-heading'))`);
+        await mainWindow.webContents.executeJavaScript(`document.querySelector('#catalog-grid-view')?.click()`);
+        await mainWindow.webContents.executeJavaScript(`document.querySelector('.catalog-open')?.click()`);
+        await new Promise((resolve) => setTimeout(resolve, 1200));
         const libraryStatus = await mainWindow.webContents.executeJavaScript(`({
           hasHeading: Boolean(document.querySelector('.archive-heading')),
           hasTree: Boolean(document.querySelector('.virtual-directory-tree')),
@@ -460,6 +513,12 @@ function createWindow() {
           hasFileBadge: Boolean(document.querySelector('.file-count-badge')),
           hasCatalogCheckbox: Boolean(document.querySelector('.catalog-select')),
           hasBulkToolbar: Boolean(document.querySelector('.warehouse-bulkbar')),
+          hasNoBulkDisabledHint: !document.querySelector('#catalog-selection-hint'),
+          paginationAfterCards: document.querySelector('#catalog-list')?.nextElementSibling?.id === 'catalog-pagination' &&
+            document.querySelector('#catalog-pagination')?.nextElementSibling?.id === 'catalog-detail',
+          overviewMatchesPrototype: document.querySelector('.warehouse-overview-head')?.parentElement?.classList.contains('warehouse-summary') &&
+            !document.querySelector('.warehouse-overview')?.innerText.includes('仓库活跃度') &&
+            document.querySelectorAll('.warehouse-metrics > div').length === 4,
           hasInventoryDate: document.querySelector('#catalog-detail')?.innerText.includes('入库日期'),
           hasBackupFilter: document.querySelectorAll('#catalog-backup-filter option').length >=
             (${process.env.HAMSTER_SMOKE_REAL_CATALOG === '1' || Boolean(process.env.HAMSTER_SMOKE_IMPORT_DIRECTORY) ? 1 : 2}),
@@ -494,11 +553,12 @@ function createWindow() {
           virtualTreeCanvasHeight: Number.parseInt(document.querySelector('.virtual-directory-canvas')?.style.height || '0', 10),
           detailText: document.querySelector('#catalog-detail')?.innerText.slice(0, 120)
         })`);
-        console.log(`HAMSTER_LIBRARY_TEST ${JSON.stringify({ ...libraryStatus, manualDialogStatus, activityStatus, defaultRandomCount, randomWalkCount, cardLightboxStatus, detailLightboxOpen, selectedCoverPath, coverState })}`);
+        console.log(`HAMSTER_LIBRARY_TEST ${JSON.stringify({ ...libraryStatus, listViewStatus, manualDialogStatus, activityStatus, defaultRandomCount, randomWalkCount, cardLightboxStatus, detailLightboxOpen, selectedCoverPath, coverState })}`);
         if (!libraryStatus.hasHeading || !libraryStatus.hasTree || !libraryStatus.hasEditor ||
             !libraryStatus.hasGridMode || libraryStatus.coverImages < 1 || !libraryStatus.hasContainedCover ||
             !libraryStatus.hasFileBadge ||
-            !libraryStatus.hasCatalogCheckbox || !libraryStatus.hasBulkToolbar || !libraryStatus.hasInventoryDate ||
+            !libraryStatus.hasCatalogCheckbox || !libraryStatus.hasBulkToolbar || !libraryStatus.hasNoBulkDisabledHint ||
+            !libraryStatus.paginationAfterCards || !libraryStatus.overviewMatchesPrototype || !libraryStatus.hasInventoryDate ||
             !libraryStatus.hasBackupFilter || !libraryStatus.hasBackupSetting ||
             (!process.env.HAMSTER_SMOKE_IMPORT_DIRECTORY && process.env.HAMSTER_SMOKE_REAL_CATALOG !== '1' && !libraryStatus.hasBackupText) ||
             !libraryStatus.hasNewControls || !libraryStatus.passwordHidden || !libraryStatus.inlineBulkTagRemoved ||
@@ -512,6 +572,7 @@ function createWindow() {
             !cardLightboxStatus.open || !cardLightboxStatus.hasImage || !cardLightboxStatus.hasCoverButton ||
             !detailLightboxOpen || !selectedCoverPath || coverState.coverThumbnailRef !== selectedCoverPath ||
             coverState.coverThumbnailPath !== selectedCoverPath ||
+            listViewStatus.rows < 1 || listViewStatus.covers !== 0 || !listViewStatus.detailBelowList || !listViewStatus.detailLoaded ||
             libraryStatus.dotArtCount !== 0 || libraryStatus.thumbnailImages < 1 ||
             !libraryStatus.hasContainedDetailImage || libraryStatus.virtualTreeCanvasHeight < 1) {
           console.error('HAMSTER_LIBRARY_TEST_FAILED');
@@ -565,7 +626,7 @@ function createWindow() {
         await fs.mkdir(path.dirname(process.env.HAMSTER_SCREENSHOT_PATH), { recursive: true });
         await fs.writeFile(process.env.HAMSTER_SCREENSHOT_PATH, image.toPNG());
       }
-      console.log(`HAMSTER_SMOKE_TEST_OK ${JSON.stringify({ bridgeStatus, ipcStatus })}`);
+      console.log(`HAMSTER_SMOKE_TEST_OK ${JSON.stringify({ bridgeStatus, ipcStatus, uiStatus })}`);
       app.quit();
     });
   }
@@ -650,9 +711,14 @@ function registerIpc() {
     return queueManager.importWarehouseFromArchiveOrDirectory(result.filePaths[0]);
   });
 
-  ipcMain.handle('app:check-for-updates', async (event) => {
+  ipcMain.handle('app:check-for-updates', async (event, options = {}) => {
     assertTrustedSender(event);
-    const result = await checkForUpdates({ currentVersion: app.getVersion(), fetchImpl: net.fetch });
+    const result = await checkForUpdates({
+      currentVersion: app.getVersion(),
+      fetchImpl: net.fetch,
+      timeoutMs: options?.silent === true ? 6_000 : 8_000
+    });
+    if (options?.silent === true) return result;
     if (!result.updateAvailable) {
       await dialog.showMessageBox(mainWindow, {
         type: 'info',
@@ -838,6 +904,11 @@ function registerIpc() {
     return queueManager.getState();
   });
 
+  ipcMain.handle('queue:start-inventory-only', async (event) => {
+    assertTrustedSender(event);
+    return queueManager.startInventoryOnlyQueue();
+  });
+
   ipcMain.handle('queue:pause', async (event) => {
     assertTrustedSender(event);
     return queueManager.pauseCurrent();
@@ -862,10 +933,18 @@ function registerIpc() {
     assertTrustedSender(event);
     return queueManager.clearCompletedJobs();
   });
+  ipcMain.handle('queue:clear-cancelled', async (event) => {
+    assertTrustedSender(event);
+    return queueManager.clearCancelledJobs();
+  });
 
   ipcMain.handle('queue:clear-duplicates', async (event) => {
     assertTrustedSender(event);
     return queueManager.removePotentialDuplicateJobs();
+  });
+  ipcMain.handle('queue:clear-exact-duplicates', async (event) => {
+    assertTrustedSender(event);
+    return queueManager.removeExactDuplicateJobs();
   });
   ipcMain.handle('queue:confirm-all-duplicates', async (event) => {
     assertTrustedSender(event);
@@ -971,6 +1050,11 @@ function registerIpc() {
     return queueManager.updateBackupLocationForCatalogRecords(recordIds, location);
   });
 
+  ipcMain.handle('catalog:queue-compression', async (event, recordIds) => {
+    assertTrustedSender(event);
+    return queueManager.queueCatalogRecordsForCompression(recordIds);
+  });
+
 
   ipcMain.handle('catalog:undo', async (event) => {
     assertTrustedSender(event);
@@ -1015,6 +1099,10 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   if (process.env.HAMSTER_SMOKE_LIBRARY_DIR) {
     config.archiveOutputDirectory = process.env.HAMSTER_SMOKE_LIBRARY_DIR;
     config.repositoryDirectory = process.env.HAMSTER_SMOKE_WAREHOUSE_DIR || path.join(process.env.HAMSTER_SMOKE_LIBRARY_DIR, 'saves');
+  }
+  if (isSmokeTest && ['trash', 'move', 'keep'].includes(process.env.HAMSTER_SMOKE_SOURCE_DISPOSITION)) {
+    config.autoTrashCompleted = process.env.HAMSTER_SMOKE_SOURCE_DISPOSITION === 'trash';
+    config.moveCompleted = process.env.HAMSTER_SMOKE_SOURCE_DISPOSITION === 'move';
   }
   config.archiveStagingDirectory = makeArchiveStagingDirectory(config.archiveOutputDirectory);
   for (const directory of [config.repositoryDirectory].filter(Boolean)) {

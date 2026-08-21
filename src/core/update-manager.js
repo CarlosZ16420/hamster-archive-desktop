@@ -29,6 +29,14 @@ $targetPid = [int]$env:HAMSTER_UPDATE_TARGET_PID
 $version = [string]$env:HAMSTER_UPDATE_VERSION
 $logFile = Join-Path $runRoot 'update.log'
 
+function Normalize-Version([string]$Value) {
+  $normalized = ([string]$Value).Trim()
+  if ($normalized.StartsWith('v', [System.StringComparison]::OrdinalIgnoreCase)) {
+    $normalized = $normalized.Substring(1)
+  }
+  return $normalized
+}
+
 function Write-UpdateLog([string]$Message) {
   $stamp = (Get-Date).ToString('s')
   Add-Content -LiteralPath $logFile -Value "$stamp $Message" -Encoding UTF8
@@ -73,7 +81,7 @@ try {
     throw '新版本未在 45 秒内完成启动验证。'
   }
   $validatedVersion = [string]((Get-Content -LiteralPath $validationFile -Raw -Encoding UTF8 | ConvertFrom-Json).version)
-  if ($validatedVersion -ne $version) {
+  if ((Normalize-Version $validatedVersion) -ne (Normalize-Version $version)) {
     if (-not $child.HasExited) { Stop-Process -Id $child.Id -Force -ErrorAction SilentlyContinue }
     throw "启动验证版本不一致：期望 $version，实际 $validatedVersion。"
   }
@@ -131,8 +139,25 @@ function resolvePowerShellExecutable(environment = process.env, existsSync = fs.
 }
 
 function normalizeDigest(value) {
-  const match = String(value || '').trim().match(/^(?:sha256:)?([a-f0-9]{64})$/i);
+  const match = String(value || '').trim().match(/(?:sha256\s*[:=]\s*)?([a-f0-9]{64})/i);
   return match ? match[1].toLowerCase() : '';
+}
+
+function normalizeVersion(value) {
+  return String(value || '').trim().replace(/^v(?=\d)/i, '');
+}
+
+async function fetchDigestSidecar(url, fetchImpl) {
+  if (!url) return '';
+  const parsed = new URL(String(url));
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com') {
+    throw new Error('SHA256 摘要地址不是受信任的 GitHub HTTPS 地址。');
+  }
+  const response = await fetchImpl(parsed.href, {
+    headers: { Accept: 'text/plain', 'User-Agent': 'hamster-archiver-update-manager' }
+  });
+  if (!response.ok) throw new Error(`SHA256 摘要下载失败（HTTP ${response.status}）。`);
+  return normalizeDigest(await response.text());
 }
 
 async function hashFile(filePath) {
@@ -200,7 +225,8 @@ async function exists(targetPath) {
 async function prepareUpdate({ applicationRoot, userDataDirectory, sevenZipPath, currentVersion, release, fetchImpl, onProgress = () => {} }) {
   if (process.platform !== 'win32') throw new Error('自动更新目前仅支持 Windows 便携版。');
   if (!release?.asset?.downloadUrl) throw new Error('这个 Release 没有可用的 Windows 更新包。');
-  const expectedDigest = normalizeDigest(release.asset.digest);
+  const expectedDigest = normalizeDigest(release.asset.digest) ||
+    await fetchDigestSidecar(release.asset.digestDownloadUrl, fetchImpl);
   if (!expectedDigest) throw new Error('Release 缺少 SHA256 摘要，已停止更新。');
   const version = String(release.latestVersion || '').replace(/[^0-9A-Za-z.-]/g, '_');
   const runRoot = path.join(path.resolve(userDataDirectory), 'updates', `${version}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`);
@@ -215,7 +241,9 @@ async function prepareUpdate({ applicationRoot, userDataDirectory, sevenZipPath,
     await extractArchive(sevenZipPath, archivePath, extractRoot);
     const packageRoot = await locatePackageRoot(extractRoot);
     const manifest = JSON.parse(await fsp.readFile(path.join(packageRoot, 'release-manifest.json'), 'utf8'));
-    if (String(manifest.version) !== String(release.latestVersion)) throw new Error('更新包版本与 Release 标签不一致。');
+    if (normalizeVersion(manifest.version) !== normalizeVersion(release.latestVersion)) {
+      throw new Error('更新包版本与 Release 标签不一致。');
+    }
     onProgress({ stage: 'prepared', downloadedBytes: release.asset.size || 0, totalBytes: release.asset.size || 0, percentage: 100 });
     return { runRoot, packageRoot, archivePath, version: release.latestVersion, currentVersion, applicationRoot: path.resolve(applicationRoot) };
   } catch (error) {
@@ -400,6 +428,7 @@ async function cleanupSuccessfulUpdateRuns(userDataDirectory) {
 
 module.exports = {
   normalizeDigest,
+  normalizeVersion,
   hashFile,
   prepareUpdate,
   launchUpdate,
