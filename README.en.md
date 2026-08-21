@@ -10,7 +10,7 @@ Local-first batch archiver and searchable media vault for Windows.
 
 Local-first · Batch archiving · Media previews · Portable user data
 
-![Version](https://img.shields.io/badge/version-4.4.7-d45f3c?style=flat-square)
+![Version](https://img.shields.io/badge/version-4.4.8-d45f3c?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-23211d?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-2f7558?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-43-456f83?style=flat-square)
@@ -80,7 +80,7 @@ Keep the release directory structure intact. Electron, 7-Zip, FFmpeg and `userda
 
 If the application reports that automatic update did not finish, the old version remains intact and usable. Copying the portable data directory preserves more information than re-importing the warehouse:
 
-Update checks use the public release channel, while source code and development commits are kept in a private repository. Versions 4.2.0 and earlier still check the older public release channel and will not see newer 4.4.x builds until that channel is updated. If 4.2.0 does not find an update, use the manual steps below. Newer builds verify the ZIP SHA256 before installation and roll back if replacement or startup validation fails.
+Update checks use the public release channel, while source code and development commits are kept in a private repository. Version 4.2.0 can discover and verify a newer Release, but its built-in updater copies the new `resources` directory into a nested path. Startup validation therefore still reads version 4.2.0 and rolls back. Upgrading from 4.2.0 requires the manual steps below. After that one manual upgrade, the fixed updater replaces backed-up program directories before startup validation and always excludes the existing `userdata` directory.
 
 1. Export the warehouse once from the old version as a safety copy, then exit the application completely.
 2. Download the latest Windows x64 ZIP from [Releases](../../releases) and extract it into a **new directory**. Do not replace only the EXE or overwrite a directory that is still running.
@@ -108,7 +108,7 @@ The source repository does not contain the large `ffmpeg.exe` binary. Put FFmpeg
 ## Portable data layout
 
 ```text
-HamsterArchiver-v4.4.7-win-x64/
+HamsterArchiver-v4.4.8-win-x64/
 ├─ HamsterArchiver.exe
 ├─ tools/
 │  ├─ 7zip/

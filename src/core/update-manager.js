@@ -18,6 +18,21 @@ $quotedWorker = '"' + $workerScript.Replace('"', '\"') + '"'
 Start-Process -FilePath $powerShell -ArgumentList '-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$quotedWorker -WindowStyle Hidden | Out-Null
 `;
 
+const INSTALL_STAGE_ITEMS_SCRIPT = String.raw`
+function Install-StageItems([object[]]$Items, [string]$DestinationRoot) {
+  foreach ($item in $Items) {
+    $destination = Join-Path $DestinationRoot $item.Name
+    # Copy-Item nests a source directory when its destination directory already
+    # exists (resources -> resources\resources). Remove the backed-up old item
+    # first so the new directory is installed at the exact portable-app path.
+    if (Test-Path -LiteralPath $destination) {
+      Remove-Item -LiteralPath $destination -Recurse -Force
+    }
+    Copy-Item -LiteralPath $item.FullName -Destination $destination -Recurse -Force
+  }
+}
+`;
+
 const APPLY_UPDATE_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 $appRoot = [IO.Path]::GetFullPath([string]$env:HAMSTER_UPDATE_APP_ROOT)
@@ -42,6 +57,8 @@ function Write-UpdateLog([string]$Message) {
   Add-Content -LiteralPath $logFile -Value "$stamp $Message" -Encoding UTF8
 }
 
+${INSTALL_STAGE_ITEMS_SCRIPT}
+
 try {
   Set-Content -LiteralPath $startedFile -Value (@{ pid = $PID; startedAt = (Get-Date).ToString('o') } | ConvertTo-Json) -Encoding UTF8
   Write-UpdateLog "等待主程序退出：PID $targetPid"
@@ -62,9 +79,7 @@ try {
   }
   Write-UpdateLog "已创建程序文件回滚副本。"
 
-  foreach ($item in $stageItems) {
-    Copy-Item -LiteralPath $item.FullName -Destination (Join-Path $appRoot $item.Name) -Recurse -Force
-  }
+  Install-StageItems -Items $stageItems -DestinationRoot $appRoot
   Write-UpdateLog "已写入版本 $version 的程序文件，启动验证进程。"
 
   $newExe = Join-Path $appRoot 'HamsterArchiver.exe'
@@ -438,5 +453,6 @@ module.exports = {
   resolvePowerShellExecutable,
   waitForUpdaterStart,
   APPLY_UPDATE_SCRIPT,
-  UPDATE_LAUNCHER_SCRIPT
+  UPDATE_LAUNCHER_SCRIPT,
+  INSTALL_STAGE_ITEMS_SCRIPT
 };

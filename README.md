@@ -10,7 +10,7 @@ Local-first batch archiver and searchable media vault for Windows.
 
 本地优先 · 批量归档 · 媒体预览 · 便携数据
 
-![Version](https://img.shields.io/badge/version-4.4.7-d45f3c?style=flat-square)
+![Version](https://img.shields.io/badge/version-4.4.8-d45f3c?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-23211d?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-2f7558?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-43-456f83?style=flat-square)
@@ -118,7 +118,7 @@ Local-first batch archiver and searchable media vault for Windows.
 
 如果应用提示自动更新没有完成，旧版本不会被删除，可以继续使用。建议按下面的方式迁移，直接复制便携数据比重新导入仓库更完整：
 
-更新检查使用公开 Release 渠道；源代码和开发提交保存在私人仓库。4.2.0 及更早版本仍固定检查旧的公开 Release，在公开渠道出现 4.4.x 之前不会看到新版本。若 4.2.0 没有发现更新，请按下面的手动步骤迁移；新版本会在下载前校验 ZIP 的 SHA256，并在替换或启动验证失败时回滚。
+更新检查使用公开 Release 渠道；源代码和开发提交保存在私人仓库。4.2.0 能发现并校验新的 Release，但它内置的旧更新脚本会把新版 `resources` 复制成嵌套目录，启动验证仍读到 4.2.0 后自动回滚。因此，从 4.2.0 升级必须按下面的手动步骤迁移；完成一次手动升级后，修复版更新器会先完整替换已备份的程序目录，再进行启动验证。用户的 `userdata` 始终排除在替换范围之外。
 
 1. 在旧版本的“仓库”中先导出一次仓库作为保险，然后完全退出应用。
 2. 从 [Releases](../../releases) 下载最新 Windows x64 压缩包，完整解压到一个**新文件夹**；不要只替换 EXE，也不要覆盖仍在运行的旧目录。
@@ -146,7 +146,7 @@ npm start
 ## 便携数据布局
 
 ```text
-HamsterArchiver-v4.4.7-win-x64/
+HamsterArchiver-v4.4.8-win-x64/
 ├─ HamsterArchiver.exe
 ├─ tools/
 │  ├─ 7zip/

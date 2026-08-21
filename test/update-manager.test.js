@@ -10,6 +10,7 @@ const test = require('node:test');
 const { promisify } = require('node:util');
 const {
   APPLY_UPDATE_SCRIPT,
+  INSTALL_STAGE_ITEMS_SCRIPT,
   UPDATE_LAUNCHER_SCRIPT,
   consumeUpdateFailure,
   hashFile,
@@ -51,6 +52,48 @@ test('update script requires the current portable executable name', () => {
   assert.match(UPDATE_LAUNCHER_SCRIPT, /Start-Process/);
   assert.match(UPDATE_LAUNCHER_SCRIPT, /apply-update\.ps1/);
   assert.match(APPLY_UPDATE_SCRIPT, /Normalize-Version/);
+});
+
+test('Windows stage installation replaces existing directories instead of nesting them', {
+  skip: process.platform !== 'win32'
+}, async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hamster-update-stage-copy-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stageRoot = path.join(root, 'stage');
+  const applicationRoot = path.join(root, 'application');
+  await Promise.all([
+    fs.mkdir(path.join(stageRoot, 'resources', 'app'), { recursive: true }),
+    fs.mkdir(path.join(stageRoot, 'userdata'), { recursive: true }),
+    fs.mkdir(path.join(applicationRoot, 'resources', 'app'), { recursive: true }),
+    fs.mkdir(path.join(applicationRoot, 'userdata'), { recursive: true })
+  ]);
+  await Promise.all([
+    fs.writeFile(path.join(stageRoot, 'resources', 'app', 'version.txt'), 'new'),
+    fs.writeFile(path.join(stageRoot, 'userdata', 'marker.txt'), 'empty-new-userdata'),
+    fs.writeFile(path.join(applicationRoot, 'resources', 'app', 'version.txt'), 'old'),
+    fs.writeFile(path.join(applicationRoot, 'resources', 'app', 'stale.txt'), 'remove-me'),
+    fs.writeFile(path.join(applicationRoot, 'userdata', 'marker.txt'), 'keep-existing-userdata')
+  ]);
+  const scriptPath = path.join(root, 'install-stage.ps1');
+  await fs.writeFile(scriptPath, `\uFEFF${INSTALL_STAGE_ITEMS_SCRIPT}\n` + String.raw`
+$items = @(Get-ChildItem -LiteralPath ([string]$env:HAMSTER_TEST_STAGE) -Force | Where-Object { $_.Name -ne 'userdata' })
+Install-StageItems -Items $items -DestinationRoot ([string]$env:HAMSTER_TEST_APPLICATION)
+`, 'utf8');
+  await execFileAsync(resolvePowerShellExecutable(), [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath
+  ], {
+    windowsHide: true,
+    env: {
+      ...process.env,
+      HAMSTER_TEST_STAGE: stageRoot,
+      HAMSTER_TEST_APPLICATION: applicationRoot
+    }
+  });
+
+  assert.equal(await fs.readFile(path.join(applicationRoot, 'resources', 'app', 'version.txt'), 'utf8'), 'new');
+  await assert.rejects(() => fs.access(path.join(applicationRoot, 'resources', 'app', 'stale.txt')), /ENOENT/);
+  await assert.rejects(() => fs.access(path.join(applicationRoot, 'resources', 'resources')), /ENOENT/);
+  assert.equal(await fs.readFile(path.join(applicationRoot, 'userdata', 'marker.txt'), 'utf8'), 'keep-existing-userdata');
 });
 
 test('PowerShell resolver prefers the stable Windows system path', () => {
