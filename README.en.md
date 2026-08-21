@@ -10,7 +10,7 @@ Local-first batch archiver and searchable media vault for Windows.
 
 Local-first · Batch archiving · Media previews · Portable user data
 
-![Version](https://img.shields.io/badge/version-4.4.8-d45f3c?style=flat-square)
+![Version](https://img.shields.io/badge/version-4.4.9-d45f3c?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-23211d?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-2f7558?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-43-456f83?style=flat-square)
@@ -108,7 +108,7 @@ The source repository does not contain the large `ffmpeg.exe` binary. Put FFmpeg
 ## Portable data layout
 
 ```text
-HamsterArchiver-v4.4.8-win-x64/
+HamsterArchiver-v4.4.9-win-x64/
 ├─ HamsterArchiver.exe
 ├─ tools/
 │  ├─ 7zip/

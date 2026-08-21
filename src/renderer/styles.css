@@ -1263,7 +1263,7 @@ main { max-width: 1560px; padding: 22px 26px 40px; }
 .queue-heading { min-width: 0; padding-top: 2px; }
 .queue-heading .step { margin: 0 0 5px; }
 .queue-heading h2 { margin: 0; white-space: nowrap; }
-.queue-title .queue-actions { display: flex; align-content: flex-start; justify-content: flex-start; flex-wrap: wrap; gap: 7px; max-width: none; }
+.queue-title .queue-actions { display: flex; align-content: flex-start; justify-content: flex-end; flex-wrap: wrap; gap: 7px; max-width: none; }
 .queue-title .queue-actions .button { padding: 7px 11px; font-size: 12px; }
 .queue-title .queue-actions .queue-action-break { flex: 0 0 100%; width: 0; height: 0; margin: -3px 0 0; }
 .queue-title .queue-actions #start-inventory-only { margin-left: auto; }
@@ -1273,6 +1273,6 @@ main { max-width: 1560px; padding: 22px 26px 40px; }
 
 @media (max-width: 700px) {
   .queue-title { grid-template-columns: 1fr; gap: 12px; }
-  .queue-title .queue-actions { justify-content: flex-start; }
+  .queue-title .queue-actions { justify-content: flex-end; }
   .queue-title .queue-actions #start-inventory-only { margin-left: 0; }
 }
